@@ -25,7 +25,10 @@
 - [x] Answer checking with educational feedback
 - [x] Track a transparent learner mastery score
 - [x] Adapt recommended quiz difficulty from recent performance
-- [ ] Recommend specific concepts to review next
+- [x] Track concept-level performance
+- [x] Detect weak concepts
+- [x] Recommend specific concepts to review next
+- [x] Generate a personalized source-grounded review for the weakest concept
 - [ ] Persist learner progress across sessions
 
 ## Phase 4 — Human-Centered Educational AI
@@ -44,3 +47,4 @@
 3. How can citations and uncertainty improve student trust in AI-generated educational guidance?
 4. What interaction design best supports educators while keeping them in control of the learning process?
 5. Can a simple, transparent mastery model improve the sequencing of AI-generated educational questions?
+6. Can concept-level performance signals help an AI tutor recommend useful, targeted review without over-automating the learning process?
