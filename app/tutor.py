@@ -16,6 +16,7 @@ class StudyTutor:
         self.document_name: str | None = None
         self.quiz_bank: dict[str, dict] = {}
         self.progress = LearnerProgress()
+        self.last_generation_error: str | None = None
 
     @property
     def llm_available(self) -> bool:
@@ -31,6 +32,7 @@ class StudyTutor:
         self.document_name = filename
         self.quiz_bank.clear()
         self.progress = LearnerProgress()
+        self.last_generation_error = None
         return chunk_count
 
     def _retrieval_query(self, text: str) -> str:
@@ -121,6 +123,7 @@ class StudyTutor:
         use_llm: bool = True,
         language: str = "english",
     ) -> tuple[str, list[dict], str]:
+        self.last_generation_error = None
         retrieval_query = self._retrieval_query(question)
         results = self.index.search(retrieval_query, top_k=top_k)
         if not results:
@@ -155,8 +158,11 @@ class StudyTutor:
                     language=language,
                 )
                 return answer, sources, "gemini"
-            except Exception:
-                pass
+            except Exception as exc:
+                # Keep the public fallback safe, but preserve the failure reason
+                # for tests and evaluation so provider/validation failures are not
+                # silently indistinguishable from normal retrieval fallback.
+                self.last_generation_error = f"{type(exc).__name__}: {exc}"
 
         answer = (
             "المولد اللغوي غير متاح لهذا الطلب، لكن المقاطع الأكثر صلة من المصدر معروضة أدناه حتى تتمكن من مراجعتها مباشرة."
