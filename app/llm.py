@@ -42,6 +42,53 @@ class GeminiTutor:
         allowed = {int(page) for page in allowed_pages}
         return sorted({page for page in cls.cited_pages(text) if page not in allowed})
 
+    @staticmethod
+    def _strip_page_citations(text: str) -> str:
+        """Remove citation blocks so page numbers are not treated as answer facts."""
+        return re.sub(
+            r"\[(?:\s*p\.\s*\d+\s*,?\s*)+\]",
+            " ",
+            text,
+            flags=re.IGNORECASE,
+        )
+
+    @staticmethod
+    def _numeric_values(text: str) -> set[str]:
+        """Extract normalized numeric values for deterministic grounding checks."""
+        values: set[str] = set()
+        for match in re.finditer(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?", text):
+            raw = match.group(0).replace(",", "")
+            sign = "-" if raw.startswith("-") else ""
+            number = raw[1:] if sign else raw
+
+            if "." in number:
+                integer, fraction = number.split(".", 1)
+                integer = integer.lstrip("0") or "0"
+                fraction = fraction.rstrip("0")
+                normalized = integer if not fraction else f"{integer}.{fraction}"
+            else:
+                normalized = number.lstrip("0") or "0"
+
+            values.add(sign + normalized)
+        return values
+
+    @classmethod
+    def unsupported_numeric_values(
+        cls,
+        answer: str,
+        question: str,
+        sources: list[dict],
+    ) -> list[str]:
+        """Return answer numbers that do not occur in the question or supplied evidence."""
+        answer_without_citations = cls._strip_page_citations(answer)
+        answer_values = cls._numeric_values(answer_without_citations)
+
+        allowed_text = question + "\n" + "\n".join(
+            str(source.get("text", "")) for source in sources
+        )
+        allowed_values = cls._numeric_values(allowed_text)
+        return sorted(answer_values - allowed_values)
+
     def translate_for_retrieval(self, text: str, target_language: str) -> str:
         """Translate a query only for retrieval; do not add facts or explanation."""
         if not self.client:
@@ -162,6 +209,7 @@ RULES:
 - Do not add outside facts, even if you know them.
 - Address every distinct part of the learner's question that is supported by the source context.
 - Prefer specific quantitative or concrete evidence over vague summary statements when both are available.
+- Copy quantitative values, ranges, percentages, years, and measurements exactly from the supplied source context or learner question. Do not calculate, convert, interpolate, round, or invent numeric values.
 - If one part of a multi-part question is not supported, explicitly say that the supplied evidence does not support that part instead of silently omitting it.
 - If the sources do not contain enough information to answer reliably, say exactly:
   "{refusal}"
@@ -193,12 +241,27 @@ Write a direct educational answer with page citations.
             raise RuntimeError("The language model returned an empty response.")
 
         invalid_pages = self.invalid_citation_pages(text, allowed_pages)
-        if invalid_pages:
+        unsupported_numbers = self.unsupported_numeric_values(text, question, sources)
+
+        if invalid_pages or unsupported_numbers:
+            problems: list[str] = []
+            if invalid_pages:
+                problems.append(
+                    f"citations outside the supplied evidence pages: {invalid_pages}"
+                )
+            if unsupported_numbers:
+                problems.append(
+                    f"numeric values not present in the question or supplied evidence: {unsupported_numbers}"
+                )
+            problem_text = "; ".join(problems)
+
             repair_prompt = f"""
 Rewrite the draft answer below so every factual statement is supported ONLY by the supplied source context.
 Do not add outside facts.
 Use ONLY these citation pages: {allowed_pages}.
-Remove or correct every citation to any other page.
+Copy every quantitative value exactly from the learner question or supplied source context.
+Do not calculate, convert, interpolate, round, or invent any numeric value.
+Correct the following grounding problem(s): {problem_text}.
 If a claim cannot be supported by the supplied context, remove it or state that the evidence does not support it.
 Preserve the requested {output_language} language and learner level.
 Return ONLY the corrected answer.
@@ -218,9 +281,23 @@ DRAFT ANSWER:
             )
             repaired = (repaired_response.text or "").strip()
             if not repaired:
-                raise RuntimeError("The language model returned an empty citation repair response.")
-            if self.invalid_citation_pages(repaired, allowed_pages):
-                raise RuntimeError("The language model returned citations outside the supplied evidence.")
+                raise RuntimeError("The language model returned an empty grounding repair response.")
+
+            remaining_invalid_pages = self.invalid_citation_pages(repaired, allowed_pages)
+            remaining_unsupported_numbers = self.unsupported_numeric_values(
+                repaired,
+                question,
+                sources,
+            )
+            if remaining_invalid_pages:
+                raise RuntimeError(
+                    "The language model returned citations outside the supplied evidence."
+                )
+            if remaining_unsupported_numbers:
+                raise RuntimeError(
+                    "The language model returned unsupported numeric values: "
+                    f"{remaining_unsupported_numbers}"
+                )
             text = repaired
 
         return text
