@@ -34,7 +34,7 @@ The interactive experience includes:
 
 1. **Upload** — load an educational PDF and detect whether its dominant language is English or Arabic.
 2. **Ask Tutor** — ask in English or Arabic and receive a source-grounded answer in the selected tutor language.
-3. **Cross-language retrieval** — when the learner's query language differs from the PDF, translate only the retrieval query into the source language before TF-IDF search.
+3. **Cross-language retrieval** — when the learner's query language differs from the PDF, translate only the retrieval query into the source language before lexical search.
 4. **Adaptive Quiz** — generate source-grounded questions, reference answers, concept labels, and grading feedback in English or Arabic.
 5. **Progress** — view mastery, attempts, recommended difficulty, and weak concepts in a readable learning snapshot.
 6. **Personalized Review** — review the weakest detected concept automatically or choose one manually.
@@ -60,7 +60,10 @@ Learner question in English or Arabic
       +--> different language: translate retrieval query only
       |
       v
-TF-IDF retrieval + cosine similarity
+Conservative word-level TF-IDF grounding gate
+      |
+      v
+Character n-gram TF-IDF reranking + page diversification
       |
       v
 Original source passages + PDF pages
@@ -82,9 +85,44 @@ Transparent learner model
 
 The translation step is used only to improve retrieval. It is not treated as source evidence. Final answers are still constrained to retrieved passages from the uploaded PDF.
 
+The retrieval layer remains fully lexical: word-level TF-IDF is used for the conservative grounding gate, while character n-gram TF-IDF improves ranking robustness when PDF text extraction introduces broken or partially split words. This is not embedding-based semantic retrieval.
+
+## Retrieval Evaluation
+
+A reproducible retrieval benchmark is included under `evaluation/` using **State of Kuwait - First Biennial Update Report** as the evaluation document.
+
+The current hand-checked benchmark contains:
+
+- **8 in-scope questions** with expected physical PDF source pages.
+- **5 out-of-source questions** that should be rejected rather than answered from unrelated evidence.
+- Page-aware Top-3 retrieval evaluation.
+- Machine-readable JSON output for each run.
+
+### Current benchmark result
+
+| Metric | Result |
+|---|---:|
+| Top-3 expected-page hit rate | **100.0% (8/8)** |
+| Out-of-source rejection rate | **100.0% (5/5)** |
+| Overall case pass rate | **100.0% (13/13)** |
+
+These results are from the small, single-document, hand-checked **Kuwait BUR Retrieval Evaluation v1** benchmark. They demonstrate correct behavior on this benchmark only and should **not** be interpreted as a general 100% accuracy claim across arbitrary PDFs, domains, languages, or generated answers.
+
+To reproduce the retrieval evaluation:
+
+```bash
+python -m evaluation.retrieval_eval \
+  --pdf "State of Kuwait - BUR.pdf" \
+  --top-k 3 \
+  --json-out evaluation/results/kuwait_bur_v3.json
+```
+
+The benchmark dataset is stored in `evaluation/kuwait_bur_eval.json`, and the evaluation runner is in `evaluation/retrieval_eval.py`.
+
 ## Design Principles
 
 - **Ground before generating** — retrieve evidence from the uploaded PDF before generation.
+- **Reject unsupported questions** — avoid answering from weak or incidental lexical overlap.
 - **Visible evidence** — expose page references and original retrieved passages to the learner.
 - **Cross-language access** — allow Arabic/English interaction without replacing the source with translated evidence.
 - **Learner adaptation** — vary explanation depth and quiz difficulty.
@@ -99,7 +137,7 @@ The translation step is used only to improve retrieval. It is not treated as sou
 - Gradio
 - PyPDF
 - scikit-learn
-- TF-IDF / cosine similarity
+- Word and character n-gram TF-IDF / cosine similarity
 - Google Gemini API (`google-genai`)
 - Pydantic
 
@@ -143,7 +181,13 @@ ai-study-tutor/
 │   ├── retrieval.py
 │   ├── session_store.py
 │   └── tutor.py
+├── evaluation/
+│   ├── kuwait_bur_eval.json
+│   ├── retrieval_eval.py
+│   └── results/
+│       └── kuwait_bur_v3.json
 ├── tests/
+│   ├── test_evaluation.py
 │   ├── test_learner.py
 │   ├── test_retrieval.py
 │   └── test_session_store.py
@@ -161,14 +205,16 @@ ai-study-tutor/
 - The mastery model is intentionally simple and transparent; it is **not a validated educational assessment instrument**.
 - Session state is in server memory and resets when the browser session or Space runtime ends.
 - Cross-language retrieval currently uses query translation plus lexical TF-IDF retrieval rather than multilingual embeddings.
+- The current retrieval benchmark is intentionally small and uses one English-language source document; broader multilingual and multi-document evaluation is still needed.
 - PDF text extraction depends on extractable text; scanned image-only PDFs are not yet OCR-enabled.
 - Generated answers and grading should be checked against the displayed source evidence and, where appropriate, an instructor.
 
 ## Next Milestones
 
-- systematic bilingual retrieval evaluation
-- grounding / citation evaluation dataset
-- multilingual embedding comparison against TF-IDF + query translation
+- bilingual Arabic/English retrieval benchmark expansion
+- answer-level grounding and citation faithfulness evaluation
+- multi-document and multi-domain evaluation
+- multilingual embedding comparison against lexical TF-IDF + query translation
 - instructor content controls
 - learning analytics dashboard
 - optional persistent learner history with privacy safeguards
@@ -179,6 +225,6 @@ The long-term goal is to build a human-centered AI tutor that helps learners und
 
 ## Status
 
-**Version 0.8 — Bilingual Arabic + English portfolio demo**
+**Version 0.8 — Bilingual Arabic + English portfolio demo with evaluated retrieval safeguards**
 
 Active development.
