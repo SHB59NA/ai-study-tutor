@@ -1,6 +1,6 @@
 # Architecture
 
-## Version 0.1
+## Version 0.2 — Grounded Generative Tutor
 
 ```text
 Student
@@ -19,7 +19,7 @@ FastAPI
   |      v
   |   TF-IDF index
   |
-  +--> Question
+  +--> Question + learner level
          |
          v
       Query vector
@@ -31,24 +31,38 @@ FastAPI
       Top source passages
          |
          v
-      Grounded response + page references
+      Grounded prompt
+         |
+         +----------------------+
+         |                      |
+   GEMINI_API_KEY set?          No
+         |                      |
+        Yes                     v
+         |                Retrieval fallback
+         v
+   Gemini generation
+         |
+         v
+   Answer constrained to source
+   + PDF page citations
 ```
 
-## Design principle
+## Design Principles
 
-The first version prioritizes transparency and source grounding. A generative LLM is intentionally not included yet, so the retrieval layer can be tested and evaluated independently before generation is added.
+1. **Retrieval before generation** — the model receives only passages selected from the uploaded document.
+2. **Source grounding** — the prompt instructs the model not to use outside facts.
+3. **Visible evidence** — generated answers cite PDF page numbers and the API also returns the retrieved source chunks.
+4. **Graceful uncertainty** — if the source does not contain enough information, the tutor is instructed to say so rather than inventing an answer.
+5. **Learner adaptation** — the same evidence can be explained at beginner, intermediate, or advanced level.
+6. **Safe fallback** — if no LLM API key is configured or generation fails, the system still returns the retrieved passages rather than hiding the failure.
 
-## Planned Version 0.2
+## Next: Version 0.3
 
-The next version will add an LLM after retrieval. The model will receive only the most relevant source passages and will be instructed to explain the answer using those sources, cite pages, and say when the source does not contain enough information.
+Add intelligent learning support:
 
-## Planned Version 0.3
-
-Add learner modeling and adaptive tutoring:
-
-- learner level
-- concept mastery
-- quiz history
-- explanation difficulty
-- targeted follow-up questions
-- bilingual Arabic/English support
+- quiz generation from uploaded sources
+- answer checking with explanations
+- concept mastery tracking
+- adaptive difficulty
+- review recommendations
+- Arabic + English learning support
