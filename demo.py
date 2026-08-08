@@ -57,6 +57,28 @@ APP_CSS = """
     padding-left: 14px;
 }
 
+.thinking-box {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--border-color-primary);
+    border-radius: 14px;
+    background: var(--background-fill-secondary);
+    font-weight: 600;
+}
+
+.thinking-dot {
+    display: inline-block;
+    font-size: 1.2rem;
+    animation: thinking-pulse 0.9s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+
 .footer-note {
     text-align: center;
     opacity: 0.72;
@@ -101,6 +123,38 @@ def _difficulty_label(value: str, language: str) -> str:
         "intermediate": "متوسط",
         "advanced": "متقدم",
     }.get(value, value)
+
+
+def _thinking(language: str, task: str = "answer") -> str:
+    messages = {
+        "answer": {
+            "english": "Thinking… Searching the uploaded source and preparing a grounded answer.",
+            "arabic": "جاري التفكير… أبحث في المصدر المرفوع وأجهز إجابة موثقة.",
+        },
+        "quiz": {
+            "english": "Generating… Finding relevant evidence and creating a grounded quiz question.",
+            "arabic": "جاري إنشاء السؤال… أبحث عن الدليل المناسب وأجهز سؤالا من المصدر.",
+        },
+        "grade": {
+            "english": "Checking your answer… Comparing it with the source-grounded reference.",
+            "arabic": "جاري تصحيح إجابتك… أقارنها بالإجابة الموثقة من المصدر.",
+        },
+        "review": {
+            "english": "Preparing your review… Finding the most relevant source evidence.",
+            "arabic": "جاري تجهيز المراجعة… أبحث عن أكثر الأدلة ارتباطا بالمفهوم.",
+        },
+        "upload": {
+            "english": "Reading the PDF… Extracting text and building the searchable index.",
+            "arabic": "جاري قراءة ملف PDF… أستخرج النص وأبني فهرس البحث.",
+        },
+    }
+    message = messages.get(task, messages["answer"]).get(language, messages["answer"]["english"])
+    return (
+        "<div class='thinking-box'>"
+        "<span class='thinking-dot'>●</span>"
+        f"<span>{message}</span>"
+        "</div>"
+    )
 
 
 def cleanup_session(request: gr.Request) -> None:
@@ -166,15 +220,23 @@ def format_progress(tutor, language: str = "english") -> str:
 def upload_pdf(file_path, language_choice, request: gr.Request):
     language = _language(language_choice)
     if not file_path:
-        return (
+        yield (
             "### لم يتم اختيار ملف\nاختر ملف PDF أولاً."
             if language == "arabic"
             else "### No document selected\nChoose a PDF file first."
         )
+        return
 
     path = Path(str(file_path))
     if path.suffix.lower() != ".pdf":
-        return "### ملف غير مدعوم\nيرجى رفع ملف PDF." if language == "arabic" else "### Unsupported file\nPlease upload a PDF document."
+        yield (
+            "### ملف غير مدعوم\nيرجى رفع ملف PDF."
+            if language == "arabic"
+            else "### Unsupported file\nPlease upload a PDF document."
+        )
+        return
+
+    yield _thinking(language, "upload")
 
     session = _session(request)
     try:
@@ -182,19 +244,31 @@ def upload_pdf(file_path, language_choice, request: gr.Request):
             chunks = session.tutor.load_document(path.name, path.read_bytes())
             document_language = session.tutor.document_language
     except Exception as exc:
-        return f"### تعذر رفع الملف\n`{exc}`" if language == "arabic" else f"### Upload failed\n`{exc}`"
+        yield (
+            f"### تعذر رفع الملف\n`{exc}`"
+            if language == "arabic"
+            else f"### Upload failed\n`{exc}`"
+        )
+        return
 
-    detected = "العربية" if document_language == "arabic" else "English" if document_language == "english" else "Unknown"
+    detected = (
+        "العربية"
+        if document_language == "arabic"
+        else "English"
+        if document_language == "english"
+        else "Unknown"
+    )
     if language == "arabic":
-        return (
+        yield (
             "### المستند جاهز\n\n"
             f"**الملف:** {path.name}  \n"
             f"**لغة المصدر المكتشفة:** {detected}  \n"
             f"**عدد مقاطع المصدر المفهرسة:** {chunks}  \n\n"
             "يمكنك الآن السؤال بالعربية أو الإنجليزية. سيبقى المستند وتقدم التعلم خاصين بجلسة المتصفح الحالية."
         )
+        return
 
-    return (
+    yield (
         "### Document ready\n\n"
         f"**File:** {path.name}  \n"
         f"**Detected source language:** {detected}  \n"
@@ -210,34 +284,50 @@ def ask_tutor(question, level, language_choice, request: gr.Request):
     with session.lock:
         tutor = session.tutor
         if tutor.document_name is None:
-            return (
+            yield (
                 "### ارفع ملف PDF أولاً\nيحتاج المدرس الذكي إلى مصدر قبل أن يجيب."
                 if language == "arabic"
                 else "### Upload a PDF first\nThe tutor needs a source document before it can answer."
             ), ""
+            return
         if not question or len(question.strip()) < 3:
-            return (
+            yield (
                 "### اكتب سؤالاً\nاكتب سؤالاً محدداً عن المادة المرفوعة."
                 if language == "arabic"
                 else "### Enter a question\nAsk something specific about the uploaded material."
             ), ""
+            return
 
-        try:
-            answer, sources, mode = tutor.answer(
+    yield _thinking(language, "answer"), ""
+
+    try:
+        with session.lock:
+            answer, sources, mode = session.tutor.answer(
                 question.strip(),
                 top_k=3,
                 level=level,
                 use_llm=True,
                 language=language,
             )
-        except Exception as exc:
-            return (f"### تعذر إنشاء الإجابة\n`{exc}`" if language == "arabic" else f"### Unable to answer\n`{exc}`"), ""
+    except Exception as exc:
+        yield (
+            f"### تعذر إنشاء الإجابة\n`{exc}`"
+            if language == "arabic"
+            else f"### Unable to answer\n`{exc}`"
+        ), ""
+        return
 
     evidence = []
     for source in sources:
-        heading = f"### صفحة PDF {source['page']}" if language == "arabic" else f"### PDF page {source['page']}"
+        heading = (
+            f"### صفحة PDF {source['page']}"
+            if language == "arabic"
+            else f"### PDF page {source['page']}"
+        )
         score_label = "درجة الاسترجاع" if language == "arabic" else "Retrieval score"
-        evidence.append(f"{heading}\n**{score_label}:** {source['score']}\n\n> {source['text']}")
+        evidence.append(
+            f"{heading}\n**{score_label}:** {source['score']}\n\n> {source['text']}"
+        )
 
     source_text = "\n\n---\n\n".join(evidence)
     if language == "arabic":
@@ -256,7 +346,7 @@ def ask_tutor(question, level, language_choice, request: gr.Request):
             f"**Mode:** {mode_label}\n\n"
             f"{answer}"
         )
-    return response, source_text
+    yield response, source_text
 
 
 def generate_quiz_question(topic, difficulty, language_choice, request: gr.Request):
@@ -266,23 +356,41 @@ def generate_quiz_question(topic, difficulty, language_choice, request: gr.Reque
     with session.lock:
         tutor = session.tutor
         if tutor.document_name is None:
-            message = "### ارفع ملف PDF أولاً\nيجب إنشاء الاختبار من مادة مصدرية." if language == "arabic" else "### Upload a PDF first\nA quiz must be generated from source material."
-            return None, message, ""
+            message = (
+                "### ارفع ملف PDF أولاً\nيجب إنشاء الاختبار من مادة مصدرية."
+                if language == "arabic"
+                else "### Upload a PDF first\nA quiz must be generated from source material."
+            )
+            yield None, message, ""
+            return
         if not topic or len(topic.strip()) < 3:
-            message = "### اكتب موضوع الاختبار\nمثال: تأثيرات تغير المناخ في الكويت" if language == "arabic" else "### Enter a quiz topic\nExample: *Climate Change Impacts in Kuwait*"
-            return None, message, ""
+            message = (
+                "### اكتب موضوع الاختبار\nمثال: تأثيرات تغير المناخ في الكويت"
+                if language == "arabic"
+                else "### Enter a quiz topic\nExample: *Climate Change Impacts in Kuwait*"
+            )
+            yield None, message, ""
+            return
 
-        try:
-            questions = tutor.create_quiz(
+    yield None, _thinking(language, "quiz"), ""
+
+    try:
+        with session.lock:
+            questions = session.tutor.create_quiz(
                 topic=topic.strip(),
                 difficulty=difficulty,
                 count=1,
                 top_k=5,
                 language=language,
             )
-        except Exception as exc:
-            message = f"### تعذر إنشاء الاختبار\n`{exc}`" if language == "arabic" else f"### Unable to generate a quiz\n`{exc}`"
-            return None, message, ""
+    except Exception as exc:
+        message = (
+            f"### تعذر إنشاء الاختبار\n`{exc}`"
+            if language == "arabic"
+            else f"### Unable to generate a quiz\n`{exc}`"
+        )
+        yield None, message, ""
+        return
 
     q = questions[0]
     if language == "arabic":
@@ -297,31 +405,52 @@ def generate_quiz_question(topic, difficulty, language_choice, request: gr.Reque
             f"**Difficulty:** `{difficulty}`  \n"
             f"**Grounding source:** PDF page {q['page']}"
         )
-    return q["id"], f"## {q['question']}", meta
+    yield q["id"], f"## {q['question']}", meta
 
 
-def grade_answer(question_id, student_answer, request: gr.Request):
+def grade_answer(question_id, student_answer, language_choice, request: gr.Request):
+    language = _language(language_choice)
     session = _session(request)
 
     with session.lock:
         tutor = session.tutor
         if not question_id:
-            return "### Generate a quiz question first.", format_progress(tutor)
+            message = (
+                "### أنشئ سؤال اختبار أولاً."
+                if language == "arabic"
+                else "### Generate a quiz question first."
+            )
+            yield message, format_progress(tutor, language)
+            return
         if not student_answer or not student_answer.strip():
-            return "### Write your answer before submitting.", format_progress(tutor)
+            message = (
+                "### اكتب إجابتك قبل التصحيح."
+                if language == "arabic"
+                else "### Write your answer before submitting."
+            )
+            yield message, format_progress(tutor, language)
+            return
+        current_progress = format_progress(tutor, language)
 
-        try:
-            result = tutor.grade_quiz_answer(
+    yield _thinking(language, "grade"), current_progress
+
+    try:
+        with session.lock:
+            result = session.tutor.grade_quiz_answer(
                 question_id=question_id,
                 student_answer=student_answer.strip(),
             )
-        except Exception as exc:
-            return f"### Unable to grade the answer\n`{exc}`", format_progress(tutor)
+            result_language = result.get("language", language)
+            progress_text = format_progress(session.tutor, result_language)
+    except Exception as exc:
+        yield (
+            f"### تعذر تصحيح الإجابة\n`{exc}`"
+            if language == "arabic"
+            else f"### Unable to grade the answer\n`{exc}`"
+        ), current_progress
+        return
 
-        language = result.get("language", "english")
-        progress_text = format_progress(tutor, language)
-
-    if language == "arabic":
+    if result_language == "arabic":
         verdict = "إجابة قوية / صحيحة" if result["correct"] else "تحتاج إلى مراجعة"
         feedback = (
             f"## {verdict}\n\n"
@@ -341,7 +470,7 @@ def grade_answer(question_id, student_answer, request: gr.Request):
             f"### Tutor feedback\n{result['feedback']}\n\n"
             f"### Recommended next step\n{result['review_recommendation']}"
         )
-    return feedback, progress_text
+    yield feedback, progress_text
 
 
 def show_progress(language_choice, request: gr.Request):
@@ -358,26 +487,43 @@ def personalized_review(concept, level, language_choice, request: gr.Request):
     with session.lock:
         tutor = session.tutor
         if tutor.document_name is None:
-            message = "### ارفع ملف PDF أولاً\nيجب أن تكون المراجعة مرتبطة بمصدر." if language == "arabic" else "### Upload a PDF first\nPersonalized review must be grounded in a source document."
-            return message, ""
+            message = (
+                "### ارفع ملف PDF أولاً\nيجب أن تكون المراجعة مرتبطة بمصدر."
+                if language == "arabic"
+                else "### Upload a PDF first\nPersonalized review must be grounded in a source document."
+            )
+            yield message, ""
+            return
 
         selected_concept = concept.strip() if concept and concept.strip() else None
         selected_level = None if level == "auto" else level
 
-        try:
-            concept_name, answer, sources, mode, final_level = tutor.personalized_review(
+    yield _thinking(language, "review"), ""
+
+    try:
+        with session.lock:
+            concept_name, answer, sources, mode, final_level = session.tutor.personalized_review(
                 concept=selected_concept,
                 level=selected_level,
                 top_k=3,
                 language=language,
             )
-        except Exception as exc:
-            message = f"### تعذر إنشاء المراجعة\n`{exc}`" if language == "arabic" else f"### Unable to create a review\n`{exc}`"
-            return message, ""
+    except Exception as exc:
+        message = (
+            f"### تعذر إنشاء المراجعة\n`{exc}`"
+            if language == "arabic"
+            else f"### Unable to create a review\n`{exc}`"
+        )
+        yield message, ""
+        return
 
     evidence = []
     for source in sources:
-        heading = f"### صفحة PDF {source['page']}" if language == "arabic" else f"### PDF page {source['page']}"
+        heading = (
+            f"### صفحة PDF {source['page']}"
+            if language == "arabic"
+            else f"### PDF page {source['page']}"
+        )
         evidence.append(f"{heading}\n\n> {source['text']}")
 
     if language == "arabic":
@@ -396,7 +542,7 @@ def personalized_review(concept, level, language_choice, request: gr.Request):
             f"**Mode:** {mode_label}\n\n"
             f"{answer}"
         )
-    return header, "\n\n---\n\n".join(evidence)
+    yield header, "\n\n---\n\n".join(evidence)
 
 
 with gr.Blocks(
@@ -428,10 +574,19 @@ with gr.Blocks(
                     "Upload one educational PDF. The tutor detects its main language and uses it as the evidence base. "
                     "You may then ask in English or Arabic, even when the PDF is in the other language."
                 )
-                pdf_file = gr.File(label="Study material (PDF)", file_types=[".pdf"], type="filepath")
+                pdf_file = gr.File(
+                    label="Study material (PDF)",
+                    file_types=[".pdf"],
+                    type="filepath",
+                )
                 upload_button = gr.Button("Load study material", variant="primary")
                 upload_status = gr.Markdown()
-                upload_button.click(upload_pdf, inputs=[pdf_file, language_choice], outputs=upload_status)
+                upload_button.click(
+                    upload_pdf,
+                    inputs=[pdf_file, language_choice],
+                    outputs=upload_status,
+                    show_progress="full",
+                )
 
             with gr.Column(scale=2):
                 gr.Markdown(
@@ -469,6 +624,7 @@ with gr.Blocks(
             ask_tutor,
             inputs=[question, level, language_choice],
             outputs=[answer_output, source_output],
+            show_progress="full",
         )
 
     with gr.Tab("3 · Adaptive Quiz"):
@@ -509,11 +665,13 @@ with gr.Blocks(
             generate_quiz_question,
             inputs=[topic, difficulty, language_choice],
             outputs=[quiz_id, quiz_question, quiz_meta],
+            show_progress="full",
         )
         grade_button.click(
             grade_answer,
-            inputs=[quiz_id, student_answer],
+            inputs=[quiz_id, student_answer, language_choice],
             outputs=[grade_output, progress_after_grade],
+            show_progress="full",
         )
 
     with gr.Tab("4 · Progress"):
@@ -524,7 +682,11 @@ with gr.Blocks(
         )
         progress_button = gr.Button("Refresh progress / تحديث التقدم", variant="primary")
         progress_output = gr.Markdown()
-        progress_button.click(show_progress, inputs=language_choice, outputs=progress_output)
+        progress_button.click(
+            show_progress,
+            inputs=language_choice,
+            outputs=progress_output,
+        )
 
     with gr.Tab("5 · Personalized Review"):
         with gr.Row():
@@ -554,6 +716,7 @@ with gr.Blocks(
             personalized_review,
             inputs=[review_concept, review_level, language_choice],
             outputs=[review_output, review_sources],
+            show_progress="full",
         )
 
     with gr.Tab("About"):
