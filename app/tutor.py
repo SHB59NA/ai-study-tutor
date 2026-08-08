@@ -1,3 +1,4 @@
+import re
 from uuid import uuid4
 
 from app.learner import LearnerProgress
@@ -31,7 +32,7 @@ class StudyTutor:
         return chunk_count
 
     def _retrieval_query(self, text: str) -> str:
-        """Translate a cross-language request into the detected PDF language for TF-IDF search."""
+        """Translate a cross-language request into the detected PDF language for lexical search."""
         document_language = self.index.language
         query_language = DocumentIndex.detect_language(text)
 
@@ -50,6 +51,60 @@ class StudyTutor:
                 pass
         return text
 
+    @staticmethod
+    def _is_multi_part_question(text: str) -> bool:
+        """Conservatively detect questions that contain several information needs."""
+        lowered = text.casefold()
+        if "," in text or "،" in text or ";" in text or "؛" in text:
+            return True
+        if lowered.count(" and ") >= 2:
+            return True
+        if lowered.count(" as well as ") >= 1:
+            return True
+        return False
+
+    def _expand_multi_part_results(
+        self,
+        retrieval_query: str,
+        base_results: list,
+        top_k: int,
+    ) -> list:
+        """Add focused evidence for distinct parts of a complex question."""
+        if not self.llm.available:
+            return base_results
+
+        try:
+            expanded_queries = self.llm.expand_retrieval_queries(
+                text=retrieval_query,
+                target_language=self.index.language,
+                max_queries=4,
+            )
+        except Exception:
+            return base_results
+
+        # Keep the initial ranking first, then add new pages discovered by the
+        # focused queries. Limiting to at most 6 pages keeps generation context
+        # compact while allowing a multi-part question to gather missing evidence.
+        max_sources = min(6, max(top_k, top_k * 2))
+        merged = list(base_results)
+        seen_pages = {chunk.page for chunk, _ in merged}
+
+        for query in expanded_queries:
+            try:
+                focused = self.index.search(query, top_k=top_k)
+            except Exception:
+                continue
+
+            for chunk, score in focused:
+                if chunk.page in seen_pages:
+                    continue
+                merged.append((chunk, score))
+                seen_pages.add(chunk.page)
+                if len(merged) >= max_sources:
+                    return merged
+
+        return merged
+
     def answer(
         self,
         question: str,
@@ -67,6 +122,17 @@ class StudyTutor:
                 else "I could not find enough relevant information in the uploaded source to answer that question reliably."
             )
             return message, [], "retrieval"
+
+        if (
+            use_llm
+            and self.llm.available
+            and self._is_multi_part_question(question)
+        ):
+            results = self._expand_multi_part_results(
+                retrieval_query=retrieval_query,
+                base_results=results,
+                top_k=top_k,
+            )
 
         sources = [
             {"page": chunk.page, "score": round(score, 4), "text": chunk.text}
