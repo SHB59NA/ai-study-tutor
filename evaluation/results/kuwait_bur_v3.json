@@ -1,0 +1,28 @@
+{
+  "benchmark": "Kuwait BUR Retrieval Evaluation v1",
+  "top_k": 3,
+  "metrics": {
+    "total_cases": 13,
+    "in_scope_cases": 8,
+    "out_of_scope_cases": 5,
+    "top3_page_hit_rate": 1.0,
+    "out_of_scope_rejection_rate": 1.0,
+    "overall_case_pass_rate": 1.0
+  },
+  "case_results": {
+    "climate_projection": true,
+    "priority_vulnerability_sectors": true,
+    "water_resources": true,
+    "sea_level_rise": true,
+    "public_health": true,
+    "energy_sector_share": true,
+    "co2_share": true,
+    "energy_activity_breakdown": true,
+    "oos_world_cup": true,
+    "oos_france_capital": true,
+    "oos_hamlet": true,
+    "oos_speed_of_light": true,
+    "oos_planet": true
+  },
+  "scope_note": "Small single-document hand-checked benchmark; not a general accuracy claim."
+}
