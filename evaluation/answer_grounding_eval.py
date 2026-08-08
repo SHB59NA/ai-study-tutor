@@ -100,17 +100,18 @@ def _matches_patterns(text: str, patterns: list[str]) -> bool:
     return all(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
-def _segments(text: str) -> list[str]:
-    """Split an answer into citation-bearing units without splitting inside [p. N]."""
-    segments: list[str] = []
-    for line in text.splitlines():
-        clean = line.strip()
-        if not clean:
-            continue
+def _lines(text: str) -> list[str]:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return lines or [text.strip()]
 
+
+def _segments(text: str) -> list[str]:
+    """Split text into sentences without splitting inside citations such as [p. 68]."""
+    segments: list[str] = []
+    for line in _lines(text):
         parts = re.split(
             r"(?<!p\.)(?<=[.!?])\s+(?=[A-Z0-9])",
-            clean,
+            line,
             flags=re.IGNORECASE,
         )
         segments.extend(part.strip() for part in parts if part.strip())
@@ -122,14 +123,37 @@ def _pattern_has_expected_citation(
     pattern: str,
     expected_pages: list[int],
 ) -> bool:
-    """Check whether one required fact pattern is locally supported by an expected page."""
+    """Check local sentence support and paragraph/list-item trailing citation scope."""
     expected = set(expected_pages)
-    for segment in _segments(answer):
-        if not re.search(pattern, segment, flags=re.IGNORECASE):
+
+    for line in _lines(answer):
+        if not re.search(pattern, line, flags=re.IGNORECASE):
             continue
-        cited = set(GeminiTutor.cited_pages(segment))
-        if cited.intersection(expected):
-            return True
+
+        segments = _segments(line)
+
+        # Prefer strict sentence-local support when it is available.
+        for segment in segments:
+            if not re.search(pattern, segment, flags=re.IGNORECASE):
+                continue
+            cited = set(GeminiTutor.cited_pages(segment))
+            if cited.intersection(expected):
+                return True
+
+        # A single citation-bearing final sentence commonly supports the whole
+        # paragraph or bullet item. Allow that backward scope only when there is
+        # exactly one cited sentence, avoiding ambiguous mixed-citation paragraphs.
+        cited_segments: list[tuple[int, set[int]]] = []
+        for index, segment in enumerate(segments):
+            cited = set(GeminiTutor.cited_pages(segment))
+            if cited:
+                cited_segments.append((index, cited))
+
+        if len(cited_segments) == 1:
+            index, cited = cited_segments[0]
+            if index == len(segments) - 1 and cited.intersection(expected):
+                return True
+
     return False
 
 
@@ -153,6 +177,15 @@ def _is_external_provider_error(error: str | None) -> bool:
         "connection reset",
     )
     return any(marker in lowered for marker in markers)
+
+
+def _is_generation_unavailable(item: AnswerCaseResult) -> bool:
+    """Return True when retrieval succeeded but no generated in-scope answer exists."""
+    if item.case_type != "in_scope" or item.mode == "gemini":
+        return False
+    if _is_external_provider_error(item.generation_error):
+        return True
+    return item.mode in {"retrieval", "error"} and bool(item.source_pages)
 
 
 def evaluate_fact(answer: str, fact: dict[str, Any]) -> FactResult:
@@ -259,11 +292,11 @@ def summarize(results: list[AnswerCaseResult]) -> dict[str, Any]:
     provider_errors = [
         item for item in results if _is_external_provider_error(item.generation_error)
     ]
-    evaluated = [
-        item for item in results if not _is_external_provider_error(item.generation_error)
-    ]
+    generation_unavailable = [item for item in results if _is_generation_unavailable(item)]
+    evaluated = [item for item in results if not _is_generation_unavailable(item)]
     in_scope = [item for item in evaluated if item.case_type == "in_scope"]
     out_scope = [item for item in evaluated if item.case_type == "out_of_scope"]
+    all_in_scope = [item for item in results if item.case_type == "in_scope"]
     facts = [fact for item in in_scope for fact in item.fact_results]
 
     def rate(values: list[bool]) -> float | None:
@@ -274,9 +307,11 @@ def summarize(results: list[AnswerCaseResult]) -> dict[str, Any]:
     return {
         "total_cases": len(results),
         "evaluated_cases": len(evaluated),
+        "generation_unavailable_cases": len(generation_unavailable),
         "provider_error_cases": len(provider_errors),
         "evaluated_in_scope_cases": len(in_scope),
         "evaluated_out_of_scope_cases": len(out_scope),
+        "generation_success_rate": rate([item.mode == "gemini" for item in all_in_scope]),
         "expected_fact_coverage": rate([fact.covered for fact in facts]),
         "expected_citation_support_rate": rate(
             [fact.citation_supported for fact in facts]
@@ -344,8 +379,11 @@ def evaluate_pdf(
         )
         results.append(result)
 
-        if _is_external_provider_error(generation_error):
-            print(f"  ERROR: provider unavailable ({generation_error})\n", flush=True)
+        if _is_generation_unavailable(result):
+            if _is_external_provider_error(generation_error):
+                print(f"  ERROR: provider unavailable ({generation_error})\n", flush=True)
+            else:
+                print("  ERROR: generated answer unavailable\n", flush=True)
         else:
             status = "PASS" if result.passed else "FAIL"
             print(f"  {status}\n", flush=True)
@@ -361,8 +399,10 @@ def print_report(results: list[AnswerCaseResult], metrics: dict[str, Any]) -> No
     print("\nAI Study Tutor - Answer Grounding & Citation Evaluation")
     print("=" * 58)
     for item in results:
+        generation_unavailable = _is_generation_unavailable(item)
         provider_error = _is_external_provider_error(item.generation_error)
-        if provider_error:
+
+        if generation_unavailable:
             status = "ERROR"
         else:
             status = "PASS" if item.passed else "FAIL"
@@ -373,8 +413,9 @@ def print_report(results: list[AnswerCaseResult], metrics: dict[str, Any]) -> No
         print(f"  source pages: {item.source_pages or 'NONE'}")
         print(f"  cited pages: {item.cited_pages or 'NONE'}")
 
-        if provider_error:
-            print("  quality score: NOT SCORED (external provider failure)")
+        if generation_unavailable:
+            label = "external provider failure" if provider_error else "no generated answer"
+            print(f"  quality score: NOT SCORED ({label})")
         elif item.case_type == "in_scope":
             print(f"  fact coverage: {item.fact_coverage:.1%}")
             print(f"  citation support: {item.citation_support_rate:.1%}")
@@ -389,7 +430,12 @@ def print_report(results: list[AnswerCaseResult], metrics: dict[str, Any]) -> No
     print("-" * 58)
     print(f"Total cases: {metrics['total_cases']}")
     print(f"Evaluated cases: {metrics['evaluated_cases']}")
+    print(f"Generation-unavailable cases: {metrics['generation_unavailable_cases']}")
     print(f"Provider-error cases: {metrics['provider_error_cases']}")
+    print(
+        "Generation success rate (in-scope): "
+        f"{_format_rate(metrics['generation_success_rate'])}"
+    )
     print(
         "Expected fact coverage: "
         f"{_format_rate(metrics['expected_fact_coverage'])}"
