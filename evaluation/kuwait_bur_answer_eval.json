@@ -38,12 +38,12 @@
         {
           "id": "temperature_projection",
           "patterns": ["4\\.3", "4\\.5"],
-          "citation_pages": [68]
+          "citation_pages": [9, 68]
         },
         {
           "id": "rainfall_projection",
           "patterns": ["15\\s*%", "18\\s*%"],
-          "citation_pages": [68]
+          "citation_pages": [9, 68]
         }
       ]
     },
@@ -92,12 +92,12 @@
         {
           "id": "temperature_projection",
           "patterns": ["4\\.3", "4\\.5"],
-          "citation_pages": [68]
+          "citation_pages": [9, 68]
         },
         {
           "id": "rainfall_projection",
           "patterns": ["15\\s*%", "18\\s*%"],
-          "citation_pages": [68]
+          "citation_pages": [9, 68]
         },
         {
           "id": "boubyan_inundation",
