@@ -93,6 +93,7 @@ class StudyTutor:
             self.quiz_bank[question_id] = {
                 "question": item["question"],
                 "answer": item["answer"],
+                "concept": item["concept"],
                 "page": item["page"],
                 "difficulty": difficulty,
             }
@@ -100,6 +101,7 @@ class StudyTutor:
                 {
                     "id": question_id,
                     "question": item["question"],
+                    "concept": item["concept"],
                     "page": item["page"],
                 }
             )
@@ -119,13 +121,61 @@ class StudyTutor:
             source_page=item["page"],
         )
         score = float(grade["score"])
-        self.progress.add_score(score)
+        concept = item["concept"]
+        self.progress.add_score(score, concept=concept)
+
+        if score < 0.7:
+            recommendation = (
+                f"Review '{concept}' using the material around PDF page {item['page']}, "
+                "then try another question on the same concept."
+            )
+        else:
+            recommendation = (
+                f"Your answer shows good progress on '{concept}'. Continue with the "
+                f"recommended {self.progress.next_difficulty} difficulty."
+            )
 
         return {
             "score": round(score, 3),
             "correct": score >= 0.7,
             "feedback": grade["feedback"],
+            "concept": concept,
+            "review_recommendation": recommendation,
             "source_page": item["page"],
             "mastery_score": round(self.progress.mastery_score, 3),
             "next_difficulty": self.progress.next_difficulty,
+            "weak_concepts": self.progress.weak_concepts,
         }
+
+    def get_progress(self) -> dict:
+        return {
+            "mastery_score": round(self.progress.mastery_score, 3),
+            "next_difficulty": self.progress.next_difficulty,
+            "attempts": len(self.progress.scores),
+            "weak_concepts": self.progress.weak_concepts,
+        }
+
+    def personalized_review(
+        self,
+        concept: str | None = None,
+        level: str | None = None,
+        top_k: int = 3,
+    ) -> tuple[str, str, list[dict], str, str]:
+        selected_concept = concept or self.progress.weakest_concept
+        if not selected_concept:
+            raise RuntimeError(
+                "No weak concept is available yet. Complete and submit at least one quiz answer first."
+            )
+
+        selected_level = level or self.progress.next_difficulty
+        review_question = (
+            f"Explain the concept '{selected_concept}' for a learner who needs review. "
+            "Focus on the key idea and the most important details supported by the source."
+        )
+        answer, sources, mode = self.answer(
+            review_question,
+            top_k=top_k,
+            level=selected_level,
+            use_llm=True,
+        )
+        return selected_concept, answer, sources, mode, selected_level
