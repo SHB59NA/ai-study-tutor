@@ -1,3 +1,21 @@
+---
+title: AI Study Tutor
+emoji: 🎓
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+python_version: "3.10"
+app_file: app.py
+pinned: false
+short_description: AI-powered study tutor for personalized, source-grounded learning.
+tags:
+  - education
+  - ai
+  - rag
+  - adaptive-learning
+  - gradio
+---
+
 # AI Study Tutor
 
 AI-powered study tutor for **personalized, grounded, and interactive learning**.
@@ -113,6 +131,7 @@ ai-study-tutor/
 ├── tests/
 │   ├── test_learner.py
 │   └── test_retrieval.py
+├── app.py
 ├── demo.py
 ├── ARCHITECTURE.md
 ├── ROADMAP.md
