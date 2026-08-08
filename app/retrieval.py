@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
+import re
 
 import numpy as np
 from pypdf import PdfReader
@@ -18,6 +19,17 @@ class DocumentIndex:
         self.chunks: list[Chunk] = []
         self.vectorizer: TfidfVectorizer | None = None
         self.matrix = None
+        self.language: str = "unknown"
+
+    @staticmethod
+    def detect_language(text: str) -> str:
+        """Detect whether text is primarily Arabic or English/Latin script."""
+        arabic_chars = len(re.findall(r"[\u0600-\u06FF]", text))
+        latin_chars = len(re.findall(r"[A-Za-z]", text))
+
+        if arabic_chars == 0 and latin_chars == 0:
+            return "unknown"
+        return "arabic" if arabic_chars > latin_chars else "english"
 
     @staticmethod
     def _split_text(text: str, chunk_size: int = 900, overlap: int = 150) -> list[str]:
@@ -48,7 +60,13 @@ class DocumentIndex:
             raise ValueError("No extractable text was found in the PDF.")
 
         self.chunks = chunks
-        self.vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
+        sample = " ".join(chunk.text for chunk in chunks[:50])
+        self.language = self.detect_language(sample)
+
+        # No English-only stop-word filter: the same lexical index can support
+        # both Arabic and English documents. Cross-language queries are translated
+        # into the detected document language by StudyTutor before retrieval.
+        self.vectorizer = TfidfVectorizer(ngram_range=(1, 2), lowercase=True)
         self.matrix = self.vectorizer.fit_transform([chunk.text for chunk in chunks])
         return len(chunks)
 
