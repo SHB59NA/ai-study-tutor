@@ -74,13 +74,22 @@ def _matches_patterns(text: str, patterns: list[str]) -> bool:
 
 
 def _segments(text: str) -> list[str]:
-    """Split an answer into small citation-bearing units for deterministic checks."""
+    """Split an answer into citation-bearing units without splitting inside [p. N]."""
     segments: list[str] = []
     for line in text.splitlines():
         clean = line.strip()
         if not clean:
             continue
-        parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", clean)
+
+        # A normal sentence boundary may be ". Next", but PDF citations contain
+        # the same punctuation pattern internally: "[p. 68]". Do not split on
+        # whitespace immediately following "p." so a fact and its citation stay
+        # in the same deterministic evaluation segment.
+        parts = re.split(
+            r"(?<!p\.)(?<=[.!?])\s+(?=[A-Z0-9])",
+            clean,
+            flags=re.IGNORECASE,
+        )
         segments.extend(part.strip() for part in parts if part.strip())
     return segments or [text]
 
