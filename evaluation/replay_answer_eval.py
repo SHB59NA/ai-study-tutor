@@ -68,6 +68,21 @@ def replay_saved_report(
         if generation_error is not None:
             generation_error = str(generation_error)
 
+        # Reports created before generation-error tracking can contain an
+        # in-scope retrieval fallback with valid evidence but no generated answer.
+        # Preserve that as an unscored generation event rather than treating the
+        # fallback sentence itself as answer-quality output.
+        if (
+            case["type"] == "in_scope"
+            and mode == "retrieval"
+            and source_pages
+            and not generation_error
+        ):
+            generation_error = (
+                "LegacyGenerationFallback: saved run contains retrieved evidence "
+                "but no generated answer"
+            )
+
         replayed.append(
             evaluate_answer_case(
                 case=case,
