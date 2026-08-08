@@ -1,12 +1,19 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
-from app.models import AnswerResponse, QuestionRequest
+from app.models import (
+    AnswerResponse,
+    QuestionRequest,
+    QuizAnswerRequest,
+    QuizGradeResponse,
+    QuizRequest,
+    QuizResponse,
+)
 from app.tutor import StudyTutor
 
 app = FastAPI(
     title="AI Study Tutor",
     description="A source-grounded AI tutor for educational materials.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 tutor = StudyTutor()
@@ -16,10 +23,12 @@ tutor = StudyTutor()
 def root() -> dict:
     return {
         "name": "AI Study Tutor",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "status": "ready",
         "document_loaded": tutor.document_name,
         "llm_available": tutor.llm_available,
+        "mastery_score": round(tutor.progress.mastery_score, 3),
+        "recommended_difficulty": tutor.progress.next_difficulty,
     }
 
 
@@ -67,3 +76,42 @@ def ask_question(request: QuestionRequest) -> AnswerResponse:
         mode=mode,
         sources=sources,
     )
+
+
+@app.post("/quiz", response_model=QuizResponse)
+def create_quiz(request: QuizRequest) -> QuizResponse:
+    if tutor.document_name is None:
+        raise HTTPException(status_code=400, detail="Upload a PDF before generating a quiz.")
+
+    try:
+        questions = tutor.create_quiz(
+            topic=request.topic,
+            difficulty=request.difficulty,
+            count=request.count,
+            top_k=request.top_k,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Unable to generate the quiz.") from exc
+
+    return QuizResponse(
+        topic=request.topic,
+        difficulty=request.difficulty,
+        questions=questions,
+    )
+
+
+@app.post("/quiz/answer", response_model=QuizGradeResponse)
+def grade_quiz_answer(request: QuizAnswerRequest) -> QuizGradeResponse:
+    try:
+        result = tutor.grade_quiz_answer(
+            question_id=request.question_id,
+            student_answer=request.student_answer,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Unable to grade the answer.") from exc
+
+    return QuizGradeResponse(**result)
