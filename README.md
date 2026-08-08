@@ -2,26 +2,52 @@
 
 AI-powered study tutor for **personalized, grounded, and interactive learning**.
 
-This project explores how artificial intelligence can support students without replacing educators. The tutor answers questions from uploaded learning materials, keeps responses grounded in source content, adapts explanations to learner level, generates and grades quizzes, tracks concept-level performance, and recommends targeted review.
+This project explores how artificial intelligence can support students without replacing educators. The tutor answers questions from uploaded learning materials, keeps responses grounded in source content, adapts explanations to learner level, generates and grades quizzes, tracks concept-level performance, detects weak concepts, and recommends targeted review.
 
 ## Research Direction
 
 Artificial Intelligence for Education, Human-Centered AI, NLP, Retrieval-Augmented Generation (RAG), intelligent tutoring systems, adaptive learning, and personalized educational support.
 
-## Version 0.4 — Personalized Review MVP
+## Version 0.5 — Interactive Student Demo
 
-Current workflow:
+The project now includes an interactive Gradio interface in `demo.py`, so the complete learning workflow can be tested without manually calling API endpoints.
 
-1. Upload a PDF study document.
-2. Extract and split it into page-aware chunks.
-3. Build a TF-IDF retrieval index.
-4. Ask grounded questions at beginner, intermediate, or advanced level.
-5. Generate source-grounded quiz questions, each tagged with the concept being tested.
-6. Grade learner answers against source-grounded reference answers.
-7. Track overall mastery and recent concept-level performance.
-8. Detect concepts with low mastery.
-9. Recommend the next difficulty level.
-10. Generate a personalized review for the weakest concept using the uploaded source.
+The demo includes five learning areas:
+
+1. **Upload** — load and index an educational PDF.
+2. **Ask Tutor** — ask grounded questions at beginner, intermediate, or advanced level and inspect retrieved evidence.
+3. **Adaptive Quiz** — generate a source-grounded question, submit an answer, receive feedback, and update learner mastery.
+4. **Progress** — inspect overall mastery, attempts, recommended difficulty, and weak concepts.
+5. **Personalized Review** — automatically review the weakest detected concept or choose a concept manually.
+
+## Learning Pipeline
+
+```text
+Educational PDF
+      |
+      v
+Text extraction + page-aware chunking
+      |
+      v
+TF-IDF retrieval + cosine similarity
+      |
+      v
+Grounded Gemini generation
+      |
+      +--> Question answering + page citations
+      |
+      +--> Quiz generation + concept labels
+      |
+      +--> Answer grading + educational feedback
+      |
+      v
+Transparent learner model
+      |
+      +--> mastery score
+      +--> adaptive difficulty
+      +--> weak concept detection
+      +--> personalized review
+```
 
 The mastery model is intentionally simple and transparent for this research prototype. It is not a validated educational assessment model.
 
@@ -29,67 +55,33 @@ The mastery model is intentionally simple and transparent for this research prot
 
 - Python
 - FastAPI
+- Gradio
 - PyPDF
 - scikit-learn
 - TF-IDF / cosine similarity
 - Google Gemini API (`google-genai`)
 - Pydantic
 
-## Main Endpoints
+## Main API Endpoints
 
-### `/upload`
-Upload and index a PDF.
+- `/upload` — upload and index a PDF.
+- `/ask` — ask a source-grounded question with a selected learner level.
+- `/quiz` — generate source-grounded quiz questions with concept labels and source pages.
+- `/quiz/answer` — grade a learner answer and update learning progress.
+- `/progress` — inspect the transparent learner model and weak concepts.
+- `/review` — create source-grounded personalized review for a selected or automatically detected weak concept.
 
-### `/ask`
-Ask a source-grounded question with a selected learner level.
+## Run the Interactive Demo in Google Colab
 
-### `/quiz`
-Generate a source-grounded quiz. Each question includes a concept label and source page.
-
-### `/quiz/answer`
-Grade a learner answer. The response includes:
-
-- score
-- educational feedback
-- concept tested
-- review recommendation
-- source page
-- overall mastery score
-- next recommended difficulty
-- current weak concepts
-
-### `/progress`
-Return the learner's current transparent progress model:
-
-- overall mastery
-- number of attempts
-- next recommended difficulty
-- weak concepts with concept-level mastery
-
-### `/review`
-Generate a source-grounded explanation for a selected concept. If no concept is supplied, the tutor automatically chooses the learner's weakest detected concept.
-
-Example:
-
-```json
-{
-  "concept": null,
-  "level": null,
-  "top_k": 3
-}
-```
-
-## Colab
-
-After pulling the latest repository:
+Pull the latest code and install dependencies:
 
 ```python
 %cd /content/ai-study-tutor
 !git pull
-!pip install -q -r requirements.txt httpx
+!pip install -q -r requirements.txt
 ```
 
-Store the Gemini key securely in Colab Secrets as `GEMINI_API_KEY`, then load it before importing the app:
+Store the Gemini API key securely in Colab Secrets as `GEMINI_API_KEY`, then load it before running the app:
 
 ```python
 from google.colab import userdata
@@ -98,10 +90,40 @@ import os
 os.environ["GEMINI_API_KEY"] = userdata.get("GEMINI_API_KEY")
 ```
 
+Launch the interface:
+
+```python
+!python demo.py
+```
+
+Gradio will provide a temporary public demo link. Open that link to use the tutor through the graphical interface.
+
+## Project Structure
+
+```text
+ai-study-tutor/
+├── app/
+│   ├── __init__.py
+│   ├── learner.py
+│   ├── llm.py
+│   ├── main.py
+│   ├── models.py
+│   ├── retrieval.py
+│   └── tutor.py
+├── tests/
+│   ├── test_learner.py
+│   └── test_retrieval.py
+├── demo.py
+├── ARCHITECTURE.md
+├── ROADMAP.md
+├── requirements.txt
+└── README.md
+```
+
 ## Next Milestones
 
-- persist learner history across sessions
 - bilingual Arabic + English tutoring
+- persistent learner history across sessions
 - student feedback controls
 - instructor content controls
 - learning analytics dashboard
@@ -113,6 +135,6 @@ The long-term goal is to build a human-centered AI tutor that helps learners und
 
 ## Status
 
-**Version 0.4 — Personalized review MVP**
+**Version 0.5 — Interactive student demo**
 
 Active development.
