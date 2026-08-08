@@ -21,11 +21,12 @@
 
 ## Phase 3 — Intelligent Learning Support
 
-- [ ] Quiz generation from source material
-- [ ] Answer checking with explanations
-- [ ] Track concept mastery
-- [ ] Adapt question difficulty
-- [ ] Recommend what to review next
+- [x] Quiz generation from source material
+- [x] Answer checking with educational feedback
+- [x] Track a transparent learner mastery score
+- [x] Adapt recommended quiz difficulty from recent performance
+- [ ] Recommend specific concepts to review next
+- [ ] Persist learner progress across sessions
 
 ## Phase 4 — Human-Centered Educational AI
 
@@ -42,3 +43,4 @@
 2. How should explanations adapt to learner knowledge without removing productive struggle?
 3. How can citations and uncertainty improve student trust in AI-generated educational guidance?
 4. What interaction design best supports educators while keeping them in control of the learning process?
+5. Can a simple, transparent mastery model improve the sequencing of AI-generated educational questions?
