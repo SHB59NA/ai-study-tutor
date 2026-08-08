@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import signal
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,30 @@ class AnswerCaseResult:
     answer: str
     reason: str
     generation_error: str | None = None
+
+
+class CaseTimeoutError(TimeoutError):
+    """Raised when one generated-answer benchmark case exceeds its time budget."""
+
+
+@contextmanager
+def case_timeout(seconds: int):
+    """Bound one benchmark case on Unix/Colab so a stalled provider call cannot stop the run."""
+    if seconds <= 0 or not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _handle_timeout(signum, frame):  # noqa: ARG001
+        raise CaseTimeoutError(f"case exceeded {seconds} seconds")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 def load_dataset(path: str | Path) -> dict[str, Any]:
@@ -112,10 +138,6 @@ def evaluate_fact(answer: str, fact: dict[str, Any]) -> FactResult:
     expected_pages = [int(page) for page in fact["citation_pages"]]
     covered = _matches_patterns(answer, patterns)
 
-    # A fact can legitimately be expressed across multiple sentences, e.g.
-    # "Energy activities were dominant [p. 50]. They represented 95.6% [p. 50]."
-    # Require every fact pattern to be locally backed by an expected page rather
-    # than requiring all patterns and the citation to appear in one sentence.
     citation_supported = covered and all(
         _pattern_has_expected_citation(answer, pattern, expected_pages)
         for pattern in patterns
@@ -240,6 +262,7 @@ def summarize(results: list[AnswerCaseResult]) -> dict[str, Any]:
 def evaluate_pdf(
     pdf_path: str | Path,
     dataset_path: str | Path,
+    case_timeout_seconds: int = 90,
 ) -> tuple[list[AnswerCaseResult], dict[str, Any]]:
     pdf = Path(pdf_path)
     if not pdf.exists():
@@ -254,23 +277,44 @@ def evaluate_pdf(
 
     tutor.load_document(pdf.name, pdf.read_bytes())
     results: list[AnswerCaseResult] = []
+    total = len(dataset["cases"])
 
-    for case in dataset["cases"]:
-        answer, sources, mode = tutor.answer(
-            question=str(case["question"]),
-            level=str(case.get("level", "beginner")),
-            use_llm=True,
-            language="english",
+    for position, case in enumerate(dataset["cases"], start=1):
+        case_id = str(case["id"])
+        print(f"[{position}/{total}] Running {case_id}...", flush=True)
+
+        try:
+            with case_timeout(case_timeout_seconds):
+                answer, sources, mode = tutor.answer(
+                    question=str(case["question"]),
+                    level=str(case.get("level", "beginner")),
+                    use_llm=True,
+                    language="english",
+                )
+            generation_error = tutor.last_generation_error
+        except CaseTimeoutError as exc:
+            answer = ""
+            sources = []
+            mode = "error"
+            generation_error = f"CaseTimeoutError: {exc}"
+            print(f"  TIMEOUT: {generation_error}", flush=True)
+        except Exception as exc:
+            answer = ""
+            sources = []
+            mode = "error"
+            generation_error = f"{type(exc).__name__}: {exc}"
+            print(f"  ERROR: {generation_error}", flush=True)
+
+        result = evaluate_answer_case(
+            case=case,
+            answer=answer,
+            sources=sources,
+            mode=mode,
+            generation_error=generation_error,
         )
-        results.append(
-            evaluate_answer_case(
-                case=case,
-                answer=answer,
-                sources=sources,
-                mode=mode,
-                generation_error=tutor.last_generation_error,
-            )
-        )
+        results.append(result)
+        status = "PASS" if result.passed else "FAIL"
+        print(f"  {status}\n", flush=True)
 
     return results, summarize(results)
 
@@ -327,13 +371,23 @@ def main() -> None:
         help="Path to the answer-grounding evaluation dataset.",
     )
     parser.add_argument(
+        "--case-timeout",
+        type=int,
+        default=90,
+        help="Maximum seconds allowed for each benchmark case (0 disables timeout).",
+    )
+    parser.add_argument(
         "--json-out",
         default=None,
         help="Optional path for a machine-readable JSON report.",
     )
     args = parser.parse_args()
 
-    results, metrics = evaluate_pdf(args.pdf, args.dataset)
+    results, metrics = evaluate_pdf(
+        args.pdf,
+        args.dataset,
+        case_timeout_seconds=args.case_timeout,
+    )
     print_report(results, metrics)
 
     if args.json_out:
