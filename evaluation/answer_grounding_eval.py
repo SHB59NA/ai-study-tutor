@@ -133,6 +133,28 @@ def _pattern_has_expected_citation(
     return False
 
 
+def _is_external_provider_error(error: str | None) -> bool:
+    """Identify provider/network failures that should not be scored as answer-quality failures."""
+    if not error:
+        return False
+
+    lowered = error.casefold()
+    markers = (
+        "resource_exhausted",
+        "quota exceeded",
+        "429",
+        "casetimeouterror",
+        "deadline_exceeded",
+        "service unavailable",
+        "503",
+        "readtimeout",
+        "connecttimeout",
+        "connectionerror",
+        "connection reset",
+    )
+    return any(marker in lowered for marker in markers)
+
+
 def evaluate_fact(answer: str, fact: dict[str, Any]) -> FactResult:
     patterns = [str(item) for item in fact["patterns"]]
     expected_pages = [int(page) for page in fact["citation_pages"]]
@@ -234,28 +256,38 @@ def evaluate_answer_case(
 
 
 def summarize(results: list[AnswerCaseResult]) -> dict[str, Any]:
-    in_scope = [item for item in results if item.case_type == "in_scope"]
-    out_scope = [item for item in results if item.case_type == "out_of_scope"]
+    provider_errors = [
+        item for item in results if _is_external_provider_error(item.generation_error)
+    ]
+    evaluated = [
+        item for item in results if not _is_external_provider_error(item.generation_error)
+    ]
+    in_scope = [item for item in evaluated if item.case_type == "in_scope"]
+    out_scope = [item for item in evaluated if item.case_type == "out_of_scope"]
     facts = [fact for item in in_scope for fact in item.fact_results]
 
-    def rate(values: list[bool]) -> float:
+    def rate(values: list[bool]) -> float | None:
         if not values:
-            return 0.0
-        return sum(values) / len(values)
+            return None
+        return round(sum(values) / len(values), 4)
 
     return {
         "total_cases": len(results),
-        "in_scope_cases": len(in_scope),
-        "out_of_scope_cases": len(out_scope),
-        "expected_fact_coverage": round(rate([fact.covered for fact in facts]), 4),
-        "expected_citation_support_rate": round(
-            rate([fact.citation_supported for fact in facts]), 4
+        "evaluated_cases": len(evaluated),
+        "provider_error_cases": len(provider_errors),
+        "evaluated_in_scope_cases": len(in_scope),
+        "evaluated_out_of_scope_cases": len(out_scope),
+        "expected_fact_coverage": rate([fact.covered for fact in facts]),
+        "expected_citation_support_rate": rate(
+            [fact.citation_supported for fact in facts]
         ),
-        "citation_validity_case_rate": round(
-            rate([not item.invalid_citation_pages for item in in_scope]), 4
+        "citation_validity_case_rate": rate(
+            [not item.invalid_citation_pages for item in in_scope]
         ),
-        "out_of_scope_refusal_rate": round(rate([item.passed for item in out_scope]), 4),
-        "overall_case_pass_rate": round(rate([item.passed for item in results]), 4),
+        "out_of_scope_refusal_rate": rate([item.passed for item in out_scope]),
+        "overall_evaluated_case_pass_rate": rate(
+            [item.passed for item in evaluated]
+        ),
     }
 
 
@@ -297,13 +329,11 @@ def evaluate_pdf(
             sources = []
             mode = "error"
             generation_error = f"CaseTimeoutError: {exc}"
-            print(f"  TIMEOUT: {generation_error}", flush=True)
         except Exception as exc:
             answer = ""
             sources = []
             mode = "error"
             generation_error = f"{type(exc).__name__}: {exc}"
-            print(f"  ERROR: {generation_error}", flush=True)
 
         result = evaluate_answer_case(
             case=case,
@@ -313,25 +343,42 @@ def evaluate_pdf(
             generation_error=generation_error,
         )
         results.append(result)
-        status = "PASS" if result.passed else "FAIL"
-        print(f"  {status}\n", flush=True)
+
+        if _is_external_provider_error(generation_error):
+            print(f"  ERROR: provider unavailable ({generation_error})\n", flush=True)
+        else:
+            status = "PASS" if result.passed else "FAIL"
+            print(f"  {status}\n", flush=True)
 
     return results, summarize(results)
+
+
+def _format_rate(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.1%}"
 
 
 def print_report(results: list[AnswerCaseResult], metrics: dict[str, Any]) -> None:
     print("\nAI Study Tutor - Answer Grounding & Citation Evaluation")
     print("=" * 58)
     for item in results:
-        status = "PASS" if item.passed else "FAIL"
+        provider_error = _is_external_provider_error(item.generation_error)
+        if provider_error:
+            status = "ERROR"
+        else:
+            status = "PASS" if item.passed else "FAIL"
+
         print(f"[{status}] {item.case_id}")
         print(f"  type: {item.case_type}")
         print(f"  mode: {item.mode}")
         print(f"  source pages: {item.source_pages or 'NONE'}")
         print(f"  cited pages: {item.cited_pages or 'NONE'}")
-        if item.case_type == "in_scope":
+
+        if provider_error:
+            print("  quality score: NOT SCORED (external provider failure)")
+        elif item.case_type == "in_scope":
             print(f"  fact coverage: {item.fact_coverage:.1%}")
             print(f"  citation support: {item.citation_support_rate:.1%}")
+
         if item.invalid_citation_pages:
             print(f"  invalid citations: {item.invalid_citation_pages}")
         if item.generation_error:
@@ -340,21 +387,29 @@ def print_report(results: list[AnswerCaseResult], metrics: dict[str, Any]) -> No
 
     print("\nMetrics")
     print("-" * 58)
-    print(f"Cases: {metrics['total_cases']}")
-    print(f"Expected fact coverage: {metrics['expected_fact_coverage']:.1%}")
+    print(f"Total cases: {metrics['total_cases']}")
+    print(f"Evaluated cases: {metrics['evaluated_cases']}")
+    print(f"Provider-error cases: {metrics['provider_error_cases']}")
+    print(
+        "Expected fact coverage: "
+        f"{_format_rate(metrics['expected_fact_coverage'])}"
+    )
     print(
         "Expected citation support rate: "
-        f"{metrics['expected_citation_support_rate']:.1%}"
+        f"{_format_rate(metrics['expected_citation_support_rate'])}"
     )
     print(
         "Citation validity case rate: "
-        f"{metrics['citation_validity_case_rate']:.1%}"
+        f"{_format_rate(metrics['citation_validity_case_rate'])}"
     )
     print(
         "Out-of-source refusal rate: "
-        f"{metrics['out_of_scope_refusal_rate']:.1%}"
+        f"{_format_rate(metrics['out_of_source_refusal_rate'])}"
     )
-    print(f"Overall case pass rate: {metrics['overall_case_pass_rate']:.1%}")
+    print(
+        "Overall evaluated-case pass rate: "
+        f"{_format_rate(metrics['overall_evaluated_case_pass_rate'])}"
+    )
 
 
 def main() -> None:
