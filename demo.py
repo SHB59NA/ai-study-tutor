@@ -2,10 +2,10 @@ from pathlib import Path
 
 import gradio as gr
 
-from app.tutor import StudyTutor
+from app.session_store import SessionTutorStore, TutorSession
 
 
-tutor = StudyTutor()
+session_store = SessionTutorStore()
 
 
 APP_CSS = """
@@ -52,21 +52,9 @@ APP_CSS = """
     background: var(--background-fill-primary);
 }
 
-.section-card {
-    border: 1px solid var(--border-color-primary);
-    border-radius: 18px;
-    padding: 16px;
-    background: var(--background-fill-primary);
-}
-
 .answer-card {
     border-left: 4px solid var(--color-accent);
     padding-left: 14px;
-}
-
-.subtle-note {
-    opacity: 0.78;
-    font-size: 0.92rem;
 }
 
 .footer-note {
@@ -90,12 +78,22 @@ HERO_HTML = """
     <span class="hero-badge">Adaptive quizzes</span>
     <span class="hero-badge">Weak-concept detection</span>
     <span class="hero-badge">Personalized review</span>
+    <span class="hero-badge">Private session state</span>
   </div>
 </div>
 """
 
 
-def format_progress() -> str:
+def _session(request: gr.Request) -> TutorSession:
+    return session_store.get(request.session_hash if request else None)
+
+
+def cleanup_session(request: gr.Request) -> None:
+    """Release a user's tutor state when the browser session ends."""
+    session_store.remove(request.session_hash if request else None)
+
+
+def format_progress(tutor) -> str:
     progress = tutor.get_progress()
     mastery = float(progress["mastery_score"])
     attempts = int(progress["attempts"])
@@ -129,7 +127,7 @@ def format_progress() -> str:
     )
 
 
-def upload_pdf(file_path):
+def upload_pdf(file_path, request: gr.Request):
     if not file_path:
         return "### No document selected\nChoose a PDF file, then click **Load study material**."
 
@@ -137,8 +135,10 @@ def upload_pdf(file_path):
     if path.suffix.lower() != ".pdf":
         return "### Unsupported file\nPlease upload a PDF document."
 
+    session = _session(request)
     try:
-        chunks = tutor.load_document(path.name, path.read_bytes())
+        with session.lock:
+            chunks = session.tutor.load_document(path.name, path.read_bytes())
     except Exception as exc:
         return f"### Upload failed\n`{exc}`"
 
@@ -146,25 +146,30 @@ def upload_pdf(file_path):
         "### Document ready\n\n"
         f"**File:** {path.name}  \n"
         f"**Indexed source chunks:** {chunks}  \n\n"
-        "You can now use **Ask Tutor** or **Adaptive Quiz**. Loading a new PDF resets the current learner progress."
+        "This document and its learner progress belong only to your current browser session. "
+        "You can now use **Ask Tutor** or **Adaptive Quiz**."
     )
 
 
-def ask_tutor(question, level):
-    if tutor.document_name is None:
-        return "### Upload a PDF first\nThe tutor needs a source document before it can answer.", ""
-    if not question or len(question.strip()) < 3:
-        return "### Enter a question\nAsk something specific about the uploaded material.", ""
+def ask_tutor(question, level, request: gr.Request):
+    session = _session(request)
 
-    try:
-        answer, sources, mode = tutor.answer(
-            question.strip(),
-            top_k=3,
-            level=level,
-            use_llm=True,
-        )
-    except Exception as exc:
-        return f"### Unable to answer\n`{exc}`", ""
+    with session.lock:
+        tutor = session.tutor
+        if tutor.document_name is None:
+            return "### Upload a PDF first\nThe tutor needs a source document before it can answer.", ""
+        if not question or len(question.strip()) < 3:
+            return "### Enter a question\nAsk something specific about the uploaded material.", ""
+
+        try:
+            answer, sources, mode = tutor.answer(
+                question.strip(),
+                top_k=3,
+                level=level,
+                use_llm=True,
+            )
+        except Exception as exc:
+            return f"### Unable to answer\n`{exc}`", ""
 
     evidence = []
     for source in sources:
@@ -185,21 +190,25 @@ def ask_tutor(question, level):
     return response, source_text
 
 
-def generate_quiz_question(topic, difficulty):
-    if tutor.document_name is None:
-        return None, "### Upload a PDF first\nA quiz must be generated from source material.", ""
-    if not topic or len(topic.strip()) < 3:
-        return None, "### Enter a quiz topic\nExample: *Climate Change Impacts in Kuwait*", ""
+def generate_quiz_question(topic, difficulty, request: gr.Request):
+    session = _session(request)
 
-    try:
-        questions = tutor.create_quiz(
-            topic=topic.strip(),
-            difficulty=difficulty,
-            count=1,
-            top_k=5,
-        )
-    except Exception as exc:
-        return None, f"### Unable to generate a quiz\n`{exc}`", ""
+    with session.lock:
+        tutor = session.tutor
+        if tutor.document_name is None:
+            return None, "### Upload a PDF first\nA quiz must be generated from source material.", ""
+        if not topic or len(topic.strip()) < 3:
+            return None, "### Enter a quiz topic\nExample: *Climate Change Impacts in Kuwait*", ""
+
+        try:
+            questions = tutor.create_quiz(
+                topic=topic.strip(),
+                difficulty=difficulty,
+                count=1,
+                top_k=5,
+            )
+        except Exception as exc:
+            return None, f"### Unable to generate a quiz\n`{exc}`", ""
 
     q = questions[0]
     meta = (
@@ -210,19 +219,25 @@ def generate_quiz_question(topic, difficulty):
     return q["id"], f"## {q['question']}", meta
 
 
-def grade_answer(question_id, student_answer):
-    if not question_id:
-        return "### Generate a quiz question first.", format_progress()
-    if not student_answer or not student_answer.strip():
-        return "### Write your answer before submitting.", format_progress()
+def grade_answer(question_id, student_answer, request: gr.Request):
+    session = _session(request)
 
-    try:
-        result = tutor.grade_quiz_answer(
-            question_id=question_id,
-            student_answer=student_answer.strip(),
-        )
-    except Exception as exc:
-        return f"### Unable to grade the answer\n`{exc}`", format_progress()
+    with session.lock:
+        tutor = session.tutor
+        if not question_id:
+            return "### Generate a quiz question first.", format_progress(tutor)
+        if not student_answer or not student_answer.strip():
+            return "### Write your answer before submitting.", format_progress(tutor)
+
+        try:
+            result = tutor.grade_quiz_answer(
+                question_id=question_id,
+                student_answer=student_answer.strip(),
+            )
+        except Exception as exc:
+            return f"### Unable to grade the answer\n`{exc}`", format_progress(tutor)
+
+        progress_text = format_progress(tutor)
 
     verdict = "Correct / strong answer" if result["correct"] else "Needs review"
     feedback = (
@@ -233,34 +248,38 @@ def grade_answer(question_id, student_answer):
         f"### Tutor feedback\n{result['feedback']}\n\n"
         f"### Recommended next step\n{result['review_recommendation']}"
     )
-    return feedback, format_progress()
+    return feedback, progress_text
 
 
-def show_progress():
-    return format_progress()
+def show_progress(request: gr.Request):
+    session = _session(request)
+    with session.lock:
+        return format_progress(session.tutor)
 
 
-def personalized_review(concept, level):
-    if tutor.document_name is None:
-        return "### Upload a PDF first\nPersonalized review must be grounded in a source document.", ""
+def personalized_review(concept, level, request: gr.Request):
+    session = _session(request)
 
-    selected_concept = concept.strip() if concept and concept.strip() else None
-    selected_level = None if level == "auto" else level
+    with session.lock:
+        tutor = session.tutor
+        if tutor.document_name is None:
+            return "### Upload a PDF first\nPersonalized review must be grounded in a source document.", ""
 
-    try:
-        concept_name, answer, sources, mode, final_level = tutor.personalized_review(
-            concept=selected_concept,
-            level=selected_level,
-            top_k=3,
-        )
-    except Exception as exc:
-        return f"### Unable to create a review\n`{exc}`", ""
+        selected_concept = concept.strip() if concept and concept.strip() else None
+        selected_level = None if level == "auto" else level
+
+        try:
+            concept_name, answer, sources, mode, final_level = tutor.personalized_review(
+                concept=selected_concept,
+                level=selected_level,
+                top_k=3,
+            )
+        except Exception as exc:
+            return f"### Unable to create a review\n`{exc}`", ""
 
     evidence = []
     for source in sources:
-        evidence.append(
-            f"### PDF page {source['page']}\n\n> {source['text']}"
-        )
+        evidence.append(f"### PDF page {source['page']}\n\n> {source['text']}")
 
     mode_label = "Grounded Gemini" if mode == "gemini" else "Retrieval fallback"
     header = (
@@ -276,6 +295,7 @@ with gr.Blocks(
     title="AI Study Tutor | Source-Grounded Adaptive Learning",
     theme=gr.themes.Soft(),
     css=APP_CSS,
+    delete_cache=(3600, 3600),
 ) as demo:
     gr.HTML(HERO_HTML)
 
@@ -308,7 +328,7 @@ with gr.Blocks(
                     "2. The document is split into searchable chunks.\n"
                     "3. Relevant passages are retrieved for each request.\n"
                     "4. Gemini generates explanations only from retrieved evidence.\n\n"
-                    "**Privacy note:** this prototype processes the uploaded document for the active session."
+                    "**Session privacy:** each browser session gets its own isolated PDF, quiz bank, and learner progress."
                 )
 
     with gr.Tab("2 · Ask Tutor"):
@@ -434,12 +454,14 @@ with gr.Blocks(
             "- **Ground before generating:** retrieve evidence from the uploaded PDF first.\n"
             "- **Make evidence visible:** expose source pages and retrieved passages.\n"
             "- **Adapt to the learner:** vary explanation and practice difficulty.\n"
+            "- **Isolate learner state:** each browser session has an independent tutor instance.\n"
             "- **Support productive learning:** use feedback and targeted review instead of only giving answers.\n"
             "- **Keep the model transparent:** the mastery score is intentionally simple and inspectable.\n\n"
             "### Prototype limitation\n\n"
             "The mastery model is a research prototype, not a validated educational assessment instrument. "
             "Generated answers and grading should be checked against the displayed source evidence and, "
-            "where appropriate, an instructor."
+            "where appropriate, an instructor. Session state is stored only in server memory and resets when "
+            "the browser session or Space runtime ends."
         )
 
     gr.HTML(
@@ -447,6 +469,8 @@ with gr.Blocks(
         "AI Study Tutor · Human-Centered AI for Education · Source-grounded adaptive learning prototype"
         "</div>"
     )
+
+    demo.unload(cleanup_session)
 
 
 if __name__ == "__main__":
