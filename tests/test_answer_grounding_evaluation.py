@@ -24,6 +24,36 @@ def test_fact_coverage_and_expected_citation_support_pass():
     assert result.citation_supported is True
 
 
+def test_fact_support_can_span_multiple_cited_sentences():
+    fact = {
+        "id": "energy_dominant",
+        "patterns": [r"energy(?:-related activities| sector)", r"95\.6"],
+        "citation_pages": [50, 52],
+    }
+    answer = (
+        "Energy-related activities produced the dominant share [p. 50]. "
+        "They represented approximately 95.6% of emissions [p. 50]."
+    )
+    result = evaluate_fact(answer, fact)
+    assert result.covered is True
+    assert result.citation_supported is True
+
+
+def test_each_fact_pattern_needs_local_expected_citation():
+    fact = {
+        "id": "energy_dominant",
+        "patterns": [r"energy(?:-related activities| sector)", r"95\.6"],
+        "citation_pages": [50, 52],
+    }
+    answer = (
+        "Energy-related activities produced the dominant share [p. 50]. "
+        "They represented approximately 95.6% of emissions [p. 62]."
+    )
+    result = evaluate_fact(answer, fact)
+    assert result.covered is True
+    assert result.citation_supported is False
+
+
 def test_fact_coverage_without_expected_citation_support_fails_support():
     fact = {
         "id": "temperature_projection",
@@ -57,6 +87,31 @@ def test_invalid_citation_page_fails_in_scope_case():
     )
     assert result.passed is False
     assert result.invalid_citation_pages == [99]
+
+
+def test_generation_error_is_reported_for_grounded_fallback():
+    case = {
+        "id": "sample",
+        "type": "in_scope",
+        "question": "Sample?",
+        "expected_facts": [
+            {
+                "id": "temperature_projection",
+                "patterns": [r"4\.3", r"4\.5"],
+                "citation_pages": [68],
+            }
+        ],
+    }
+    result = evaluate_answer_case(
+        case=case,
+        answer="Fallback.",
+        sources=[{"page": 68, "text": "source", "score": 0.2}],
+        mode="retrieval",
+        generation_error="RuntimeError: example failure",
+    )
+    assert result.passed is False
+    assert result.generation_error == "RuntimeError: example failure"
+    assert "generation error" in result.reason
 
 
 def test_out_of_scope_clean_rejection_passes():
