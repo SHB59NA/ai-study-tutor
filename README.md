@@ -2,32 +2,26 @@
 
 AI-powered study tutor for **personalized, grounded, and interactive learning**.
 
-This project explores how artificial intelligence can support students without replacing educators. The tutor answers questions from uploaded learning materials, keeps responses grounded in source content, and adapts the explanation to the learner's level.
+This project explores how artificial intelligence can support students without replacing educators. The tutor answers questions from uploaded learning materials, keeps responses grounded in source content, adapts explanations to the learner's level, and can now generate and grade source-grounded quizzes.
 
-## Why this project?
+## Research Direction
 
-Large language models can be useful for learning, but educational systems need more than fluent answers. They should:
+Artificial Intelligence for Education, Human-Centered AI, NLP, Retrieval-Augmented Generation (RAG), intelligent tutoring systems, and adaptive learning.
 
-- stay grounded in trusted course material,
-- explain concepts at an appropriate level,
-- make the source of an answer visible,
-- admit when the material does not support an answer,
-- help educators rather than replace them.
-
-**Research direction:** Artificial Intelligence for Education, Human-Centered AI, NLP, Retrieval-Augmented Generation (RAG), and intelligent tutoring systems.
-
-## Version 0.2 — Grounded Generative Tutor
+## Version 0.3 — Adaptive Learning MVP
 
 Current workflow:
 
 1. Upload a PDF study document.
-2. Extract and split the document into page-aware learning chunks.
+2. Extract and split it into page-aware chunks.
 3. Build a TF-IDF retrieval index.
-4. Ask a question and choose a learner level: `beginner`, `intermediate`, or `advanced`.
-5. Retrieve the most relevant passages with cosine similarity.
-6. If a Gemini API key is configured, generate an explanation using only the retrieved source context.
-7. Return the answer together with page citations and the original retrieved passages.
-8. If no LLM is available, fall back to transparent retrieval rather than inventing content.
+4. Ask grounded questions at beginner, intermediate, or advanced level.
+5. Generate quiz questions from retrieved source passages.
+6. Grade learner answers against source-grounded reference answers.
+7. Track a simple mastery score from recent quiz performance.
+8. Recommend the next quiz difficulty: beginner, intermediate, or advanced.
+
+The mastery model is intentionally simple and transparent for this research prototype. It is not intended to represent a validated educational assessment model.
 
 ## Tech Stack
 
@@ -45,6 +39,7 @@ Current workflow:
 ai-study-tutor/
 ├── app/
 │   ├── __init__.py
+│   ├── learner.py
 │   ├── llm.py
 │   ├── main.py
 │   ├── models.py
@@ -67,7 +62,7 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-To enable generated tutoring answers, set a Gemini API key:
+Set the Gemini API key:
 
 ```bash
 export GEMINI_API_KEY="your-key"  # Windows PowerShell: $env:GEMINI_API_KEY="your-key"
@@ -85,7 +80,15 @@ Open:
 http://127.0.0.1:8000/docs
 ```
 
-## Example Question Request
+## Main Endpoints
+
+### `/upload`
+Upload and index a PDF.
+
+### `/ask`
+Ask a question grounded in the uploaded material.
+
+Example:
 
 ```json
 {
@@ -96,17 +99,41 @@ http://127.0.0.1:8000/docs
 }
 ```
 
-The response reports whether the answer came from the generative tutor (`gemini`) or the retrieval fallback (`retrieval`) and always returns the source passages used for grounding.
+### `/quiz`
+Generate a source-grounded quiz.
+
+```json
+{
+  "topic": "climate change in Kuwait",
+  "difficulty": "intermediate",
+  "count": 3,
+  "top_k": 5
+}
+```
+
+The public quiz response contains question IDs, questions, and source pages, but does not reveal the reference answers.
+
+### `/quiz/answer`
+Submit an answer using the question ID returned by `/quiz`.
+
+```json
+{
+  "question_id": "example-id",
+  "student_answer": "My answer here"
+}
+```
+
+The response returns a score, educational feedback, source page, current mastery score, and recommended next difficulty.
 
 ## Colab
 
-After cloning the repository, install dependencies:
+After cloning or pulling the latest repository:
 
 ```python
 !pip install -q -r requirements.txt httpx
 ```
 
-Store the Gemini key securely in Colab Secrets as `GEMINI_API_KEY`, then load it into the environment before importing the app:
+Store the Gemini key securely in Colab Secrets as `GEMINI_API_KEY`, then load it before importing the app:
 
 ```python
 from google.colab import userdata
@@ -115,23 +142,22 @@ import os
 os.environ["GEMINI_API_KEY"] = userdata.get("GEMINI_API_KEY")
 ```
 
-Then create the test client and use `/upload` and `/ask` as usual.
+## Next Milestone
 
-## Next Milestone — Version 0.3
-
-- source-grounded quiz generation
-- answer checking with explanations
-- concept mastery tracking
-- adaptive quiz difficulty
-- personalized review recommendations
-- Arabic + English learning support
+- recommend specific weak concepts for review
+- persist learner history
+- bilingual Arabic + English tutoring
+- student feedback controls
+- instructor content controls
+- learning analytics
+- systematic evaluation of faithfulness and educational usefulness
 
 ## Educational AI Goal
 
-The long-term goal is to build a human-centered AI tutor that can help learners understand difficult concepts, adapt explanations to individual needs, provide reliable source-grounded guidance, and give educators useful tools for creating stronger learning experiences.
+The long-term goal is to build a human-centered AI tutor that helps learners understand difficult concepts, adapts explanations and practice to individual needs, provides reliable source-grounded guidance, and gives educators useful tools while keeping them in control of the learning process.
 
 ## Status
 
-**Version 0.2 — Grounded generative tutor**
+**Version 0.3 — Adaptive learning MVP**
 
 Active development.
