@@ -17,6 +17,10 @@ class StudyTutor:
     def llm_available(self) -> bool:
         return self.llm.available
 
+    @property
+    def document_language(self) -> str:
+        return self.index.language
+
     def load_document(self, filename: str, data: bytes) -> int:
         chunk_count = self.index.load_pdf(data)
         self.document_name = filename
@@ -24,20 +28,43 @@ class StudyTutor:
         self.progress = LearnerProgress()
         return chunk_count
 
+    def _retrieval_query(self, text: str) -> str:
+        """Translate a cross-language request into the detected PDF language for TF-IDF search."""
+        document_language = self.index.language
+        query_language = DocumentIndex.detect_language(text)
+
+        if (
+            document_language in {"english", "arabic"}
+            and query_language in {"english", "arabic"}
+            and document_language != query_language
+            and self.llm.available
+        ):
+            try:
+                return self.llm.translate_for_retrieval(
+                    text=text,
+                    target_language=document_language,
+                )
+            except Exception:
+                pass
+        return text
+
     def answer(
         self,
         question: str,
         top_k: int = 3,
         level: str = "intermediate",
         use_llm: bool = True,
+        language: str = "english",
     ) -> tuple[str, list[dict], str]:
-        results = self.index.search(question, top_k=top_k)
+        retrieval_query = self._retrieval_query(question)
+        results = self.index.search(retrieval_query, top_k=top_k)
         if not results:
-            return (
-                "I could not find enough relevant information in the uploaded source to answer that question reliably.",
-                [],
-                "retrieval",
+            message = (
+                "لم أجد معلومات كافية ومرتبطة بالسؤال في المصدر المرفوع."
+                if language == "arabic"
+                else "I could not find enough relevant information in the uploaded source to answer that question reliably."
             )
+            return message, [], "retrieval"
 
         sources = [
             {"page": chunk.page, "score": round(score, 4), "text": chunk.text}
@@ -50,15 +77,20 @@ class StudyTutor:
                     question=question,
                     sources=sources,
                     level=level,
+                    language=language,
                 )
                 return answer, sources, "gemini"
             except Exception:
                 pass
 
         answer = (
-            "The generative tutor is not available for this request, but the most relevant "
-            "source passages are included below so the answer can still be checked directly "
-            "against the uploaded material."
+            "المولد اللغوي غير متاح لهذا الطلب، لكن المقاطع الأكثر صلة من المصدر معروضة أدناه حتى تتمكن من مراجعتها مباشرة."
+            if language == "arabic"
+            else (
+                "The generative tutor is not available for this request, but the most relevant "
+                "source passages are included below so the answer can still be checked directly "
+                "against the uploaded material."
+            )
         )
         return answer, sources, "retrieval"
 
@@ -68,11 +100,13 @@ class StudyTutor:
         difficulty: str = "intermediate",
         count: int = 3,
         top_k: int = 5,
+        language: str = "english",
     ) -> list[dict]:
         if not self.llm.available:
             raise RuntimeError("Quiz mode requires GEMINI_API_KEY.")
 
-        results = self.index.search(topic, top_k=top_k)
+        retrieval_topic = self._retrieval_query(topic)
+        results = self.index.search(retrieval_topic, top_k=top_k)
         if not results:
             raise RuntimeError("I could not find enough material for that quiz topic.")
 
@@ -85,6 +119,7 @@ class StudyTutor:
             sources=sources,
             difficulty=difficulty,
             count=count,
+            language=language,
         )
 
         public_questions: list[dict] = []
@@ -96,6 +131,7 @@ class StudyTutor:
                 "concept": item["concept"],
                 "page": item["page"],
                 "difficulty": difficulty,
+                "language": language,
             }
             public_questions.append(
                 {
@@ -103,6 +139,7 @@ class StudyTutor:
                     "question": item["question"],
                     "concept": item["concept"],
                     "page": item["page"],
+                    "language": language,
                 }
             )
         return public_questions
@@ -114,26 +151,40 @@ class StudyTutor:
         if not self.llm.available:
             raise RuntimeError("Answer grading requires GEMINI_API_KEY.")
 
+        language = item.get("language", "english")
         grade = self.llm.grade_answer(
             question=item["question"],
             expected_answer=item["answer"],
             student_answer=student_answer,
             source_page=item["page"],
+            language=language,
         )
         score = float(grade["score"])
         concept = item["concept"]
         self.progress.add_score(score, concept=concept)
 
-        if score < 0.7:
-            recommendation = (
-                f"Review '{concept}' using the material around PDF page {item['page']}, "
-                "then try another question on the same concept."
-            )
+        if language == "arabic":
+            if score < 0.7:
+                recommendation = (
+                    f"راجع مفهوم '{concept}' باستخدام المادة حول صفحة PDF {item['page']}، "
+                    "ثم جرّب سؤالاً آخر عن نفس المفهوم."
+                )
+            else:
+                recommendation = (
+                    f"إجابتك تظهر تقدماً جيداً في '{concept}'. تابع بالمستوى المقترح: "
+                    f"{self.progress.next_difficulty}."
+                )
         else:
-            recommendation = (
-                f"Your answer shows good progress on '{concept}'. Continue with the "
-                f"recommended {self.progress.next_difficulty} difficulty."
-            )
+            if score < 0.7:
+                recommendation = (
+                    f"Review '{concept}' using the material around PDF page {item['page']}, "
+                    "then try another question on the same concept."
+                )
+            else:
+                recommendation = (
+                    f"Your answer shows good progress on '{concept}'. Continue with the "
+                    f"recommended {self.progress.next_difficulty} difficulty."
+                )
 
         return {
             "score": round(score, 3),
@@ -145,6 +196,7 @@ class StudyTutor:
             "mastery_score": round(self.progress.mastery_score, 3),
             "next_difficulty": self.progress.next_difficulty,
             "weak_concepts": self.progress.weak_concepts,
+            "language": language,
         }
 
     def get_progress(self) -> dict:
@@ -160,6 +212,7 @@ class StudyTutor:
         concept: str | None = None,
         level: str | None = None,
         top_k: int = 3,
+        language: str = "english",
     ) -> tuple[str, str, list[dict], str, str]:
         selected_concept = concept or self.progress.weakest_concept
         if not selected_concept:
@@ -168,14 +221,22 @@ class StudyTutor:
             )
 
         selected_level = level or self.progress.next_difficulty
-        review_question = (
-            f"Explain the concept '{selected_concept}' for a learner who needs review. "
-            "Focus on the key idea and the most important details supported by the source."
-        )
+        if language == "arabic":
+            review_question = (
+                f"اشرح مفهوم '{selected_concept}' لطالب يحتاج إلى مراجعة. "
+                "ركز على الفكرة الأساسية وأهم التفاصيل المدعومة بالمصدر."
+            )
+        else:
+            review_question = (
+                f"Explain the concept '{selected_concept}' for a learner who needs review. "
+                "Focus on the key idea and the most important details supported by the source."
+            )
+
         answer, sources, mode = self.answer(
             review_question,
             top_k=top_k,
             level=selected_level,
             use_llm=True,
+            language=language,
         )
         return selected_concept, answer, sources, mode, selected_level
