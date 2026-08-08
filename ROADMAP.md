@@ -12,11 +12,12 @@
 
 ## Phase 2 — Generative Tutor
 
-- [ ] Add LLM provider abstraction
-- [ ] Generate explanations only from retrieved context
-- [ ] Require citations in answers
-- [ ] Refuse unsupported questions gracefully
-- [ ] Add simple / standard / advanced explanation modes
+- [x] Add LLM provider wrapper
+- [x] Generate explanations only from retrieved context
+- [x] Require page citations in generated answers
+- [x] Refuse unsupported questions gracefully
+- [x] Add beginner / intermediate / advanced explanation modes
+- [x] Keep transparent retrieval fallback when no API key is configured
 
 ## Phase 3 — Intelligent Learning Support
 
