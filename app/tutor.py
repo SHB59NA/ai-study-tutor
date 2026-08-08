@@ -8,6 +8,8 @@ from app.upload_validation import validate_pdf_upload
 
 
 class StudyTutor:
+    MULTI_PART_SOURCE_LIMIT = 8
+
     def __init__(self) -> None:
         self.index = DocumentIndex()
         self.llm = GeminiTutor()
@@ -82,11 +84,7 @@ class StudyTutor:
         except Exception:
             return base_results
 
-        # Keep the initial ranking, but do not let the first expanded query consume
-        # every remaining source slot. Search every facet first, then merge results
-        # round-robin by rank so each distinct information need gets a chance to
-        # contribute evidence before lower-ranked results from one facet are added.
-        max_sources = min(6, max(top_k, top_k * 2))
+        max_sources = max(self.MULTI_PART_SOURCE_LIMIT, top_k)
         merged = list(base_results)
         seen_pages = {chunk.page for chunk, _ in merged}
         focused_groups: list[list] = []
@@ -133,16 +131,15 @@ class StudyTutor:
             )
             return message, [], "retrieval"
 
-        if (
-            use_llm
-            and self.llm.available
-            and self._is_multi_part_question(question)
-        ):
-            results = self._expand_multi_part_results(
-                retrieval_query=retrieval_query,
-                base_results=results,
-                top_k=top_k,
-            )
+        if self._is_multi_part_question(question):
+            # A single Top-3 ranking can miss one facet of a compound question.
+            # After the normal grounding gate passes, widen only the evidence
+            # candidate set for multi-part questions. Single-part questions keep
+            # the benchmarked Top-K behavior unchanged.
+            candidate_k = max(top_k, self.MULTI_PART_SOURCE_LIMIT)
+            widened = self.index.search(retrieval_query, top_k=candidate_k)
+            if widened:
+                results = widened
 
         sources = [
             {"page": chunk.page, "score": round(score, 4), "text": chunk.text}
