@@ -158,8 +158,52 @@ def test_summary_aggregates_fact_and_case_metrics():
     )
 
     metrics = summarize([in_scope, out_scope])
+    assert metrics["total_cases"] == 2
+    assert metrics["evaluated_cases"] == 2
+    assert metrics["provider_error_cases"] == 0
     assert metrics["expected_fact_coverage"] == 1.0
     assert metrics["expected_citation_support_rate"] == 1.0
     assert metrics["citation_validity_case_rate"] == 1.0
     assert metrics["out_of_scope_refusal_rate"] == 1.0
-    assert metrics["overall_case_pass_rate"] == 1.0
+    assert metrics["overall_evaluated_case_pass_rate"] == 1.0
+
+
+def test_provider_quota_error_is_excluded_from_quality_metrics():
+    in_scope_case = {
+        "id": "sample",
+        "type": "in_scope",
+        "question": "Sample?",
+        "expected_facts": [
+            {
+                "id": "temperature_projection",
+                "patterns": [r"4\.3", r"4\.5"],
+                "citation_pages": [68],
+            }
+        ],
+    }
+    oos_case = {"id": "oos", "type": "out_of_scope", "question": "OOS?"}
+
+    provider_error = evaluate_answer_case(
+        case=in_scope_case,
+        answer="Fallback.",
+        sources=[{"page": 68, "text": "source", "score": 0.2}],
+        mode="retrieval",
+        generation_error="ClientError: 429 RESOURCE_EXHAUSTED: quota exceeded",
+    )
+    out_scope = evaluate_answer_case(
+        case=oos_case,
+        answer="Unsupported.",
+        sources=[],
+        mode="retrieval",
+    )
+
+    metrics = summarize([provider_error, out_scope])
+    assert metrics["total_cases"] == 2
+    assert metrics["evaluated_cases"] == 1
+    assert metrics["provider_error_cases"] == 1
+    assert metrics["evaluated_in_scope_cases"] == 0
+    assert metrics["expected_fact_coverage"] is None
+    assert metrics["expected_citation_support_rate"] is None
+    assert metrics["citation_validity_case_rate"] is None
+    assert metrics["out_of_scope_refusal_rate"] == 1.0
+    assert metrics["overall_evaluated_case_pass_rate"] == 1.0
