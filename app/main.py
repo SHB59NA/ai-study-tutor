@@ -5,8 +5,8 @@ from app.tutor import StudyTutor
 
 app = FastAPI(
     title="AI Study Tutor",
-    description="A source-grounded study assistant for educational materials.",
-    version="0.1.0",
+    description="A source-grounded AI tutor for educational materials.",
+    version="0.2.0",
 )
 
 tutor = StudyTutor()
@@ -16,9 +16,10 @@ tutor = StudyTutor()
 def root() -> dict:
     return {
         "name": "AI Study Tutor",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "status": "ready",
         "document_loaded": tutor.document_name,
+        "llm_available": tutor.llm_available,
     }
 
 
@@ -51,8 +52,18 @@ def ask_question(request: QuestionRequest) -> AnswerResponse:
         raise HTTPException(status_code=400, detail="Upload a PDF before asking a question.")
 
     try:
-        answer, sources = tutor.answer(request.question, top_k=request.top_k)
+        answer, sources, mode = tutor.answer(
+            request.question,
+            top_k=request.top_k,
+            level=request.level,
+            use_llm=request.use_llm,
+        )
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return AnswerResponse(answer=answer, sources=sources)
+    return AnswerResponse(
+        answer=answer,
+        level=request.level,
+        mode=mode,
+        sources=sources,
+    )
