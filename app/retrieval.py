@@ -15,7 +15,7 @@ class Chunk:
 
 
 class DocumentIndex:
-    """Page-aware lexical index with a conservative relevance gate."""
+    """Page-aware lexical index with conservative grounding and robust reranking."""
 
     MIN_RELEVANCE_SCORE = 0.08
     LOW_COVERAGE_THRESHOLD = 0.60
@@ -25,6 +25,8 @@ class DocumentIndex:
         self.chunks: list[Chunk] = []
         self.vectorizer: TfidfVectorizer | None = None
         self.matrix = None
+        self.char_vectorizer: TfidfVectorizer | None = None
+        self.char_matrix = None
         self.language: str = "unknown"
 
     @staticmethod
@@ -69,9 +71,8 @@ class DocumentIndex:
         sample = " ".join(chunk.text for chunk in chunks[:50])
         self.language = self.detect_language(sample)
 
-        # English stop words reduce false matches on generic words. Arabic keeps
-        # the full lexical vocabulary. Cross-language requests are translated to
-        # the detected source language by StudyTutor before retrieval.
+        # Word TF-IDF is used for the conservative evidence gate and query
+        # vocabulary coverage. English stop words reduce generic overlap.
         stop_words = "english" if self.language == "english" else None
         self.vectorizer = TfidfVectorizer(
             stop_words=stop_words,
@@ -79,6 +80,18 @@ class DocumentIndex:
             lowercase=True,
         )
         self.matrix = self.vectorizer.fit_transform([chunk.text for chunk in chunks])
+
+        # Character n-grams are more tolerant of PDF extraction artifacts such
+        # as split words (for example "chan ge" or "desalinat ed"). They are
+        # used only to rank evidence after the word-level grounding gate passes.
+        self.char_vectorizer = TfidfVectorizer(
+            analyzer="char_wb",
+            ngram_range=(3, 5),
+            lowercase=True,
+        )
+        self.char_matrix = self.char_vectorizer.fit_transform(
+            [chunk.text for chunk in chunks]
+        )
         return len(chunks)
 
     def _query_coverage(self, question: str) -> float:
@@ -102,36 +115,64 @@ class DocumentIndex:
         top_k: int = 3,
         min_score: float | None = None,
     ) -> list[tuple[Chunk, float]]:
-        if not self.chunks or self.vectorizer is None or self.matrix is None:
+        if (
+            not self.chunks
+            or self.vectorizer is None
+            or self.matrix is None
+            or self.char_vectorizer is None
+            or self.char_matrix is None
+        ):
             raise RuntimeError("No document has been indexed yet.")
 
-        query_vector = self.vectorizer.transform([question])
-        if query_vector.nnz == 0:
+        word_query_vector = self.vectorizer.transform([question])
+        if word_query_vector.nnz == 0:
             return []
 
-        scores = cosine_similarity(query_vector, self.matrix).flatten()
-        max_score = float(np.max(scores)) if scores.size else 0.0
+        word_scores = cosine_similarity(word_query_vector, self.matrix).flatten()
+        max_word_score = float(np.max(word_scores)) if word_scores.size else 0.0
         threshold = self.MIN_RELEVANCE_SCORE if min_score is None else float(min_score)
 
-        if max_score < threshold:
+        if max_word_score < threshold:
             return []
 
         # Require most informative query terms to exist somewhere in the source.
-        # This rejects questions that overlap on only one generic word (for
-        # example "capital" or "light") while retaining an override for an
-        # unusually strong lexical match.
+        # This rejects questions that overlap on only one generic word while
+        # retaining an override for an unusually strong lexical match.
         coverage = self._query_coverage(question)
         if (
             coverage < self.LOW_COVERAGE_THRESHOLD
-            and max_score < self.LOW_COVERAGE_SCORE_OVERRIDE
+            and max_word_score < self.LOW_COVERAGE_SCORE_OVERRIDE
         ):
             return []
 
-        ranked = np.argsort(scores)[::-1][:top_k]
+        char_query_vector = self.char_vectorizer.transform([question])
+        if char_query_vector.nnz == 0:
+            ranking_scores = word_scores
+        else:
+            ranking_scores = cosine_similarity(
+                char_query_vector,
+                self.char_matrix,
+            ).flatten()
+
+        # Rank with extraction-tolerant character similarity, then diversify by
+        # PDF page so Top-K evidence is not consumed by near-duplicate chunks
+        # from the same page.
+        ranked = np.argsort(ranking_scores)[::-1]
         results: list[tuple[Chunk, float]] = []
+        seen_pages: set[int] = set()
+
         for index in ranked:
-            score = float(scores[index])
+            score = float(ranking_scores[index])
             if score < threshold:
                 continue
-            results.append((self.chunks[int(index)], score))
+
+            chunk = self.chunks[int(index)]
+            if chunk.page in seen_pages:
+                continue
+
+            results.append((chunk, score))
+            seen_pages.add(chunk.page)
+            if len(results) >= top_k:
+                break
+
         return results
