@@ -30,7 +30,7 @@ APP_CSS = """
 
 .hero p {
     margin: 0;
-    max-width: 760px;
+    max-width: 800px;
     font-size: 1.05rem;
     opacity: 0.86;
 }
@@ -70,14 +70,15 @@ HERO_HTML = """
 <div class="hero">
   <h1>AI Study Tutor</h1>
   <p>
-    A source-grounded adaptive learning assistant that turns educational PDFs into
+    A bilingual, source-grounded adaptive learning assistant that turns educational PDFs into
     explanations, quizzes, progress insights, and personalized review.
   </p>
   <div class="hero-badges">
+    <span class="hero-badge">English + العربية</span>
+    <span class="hero-badge">Cross-language retrieval</span>
     <span class="hero-badge">Source-grounded RAG</span>
     <span class="hero-badge">Adaptive quizzes</span>
     <span class="hero-badge">Weak-concept detection</span>
-    <span class="hero-badge">Personalized review</span>
     <span class="hero-badge">Private session state</span>
   </div>
 </div>
@@ -88,29 +89,64 @@ def _session(request: gr.Request) -> TutorSession:
     return session_store.get(request.session_hash if request else None)
 
 
+def _language(choice: str) -> str:
+    return "arabic" if choice == "العربية" else "english"
+
+
+def _difficulty_label(value: str, language: str) -> str:
+    if language != "arabic":
+        return value
+    return {
+        "beginner": "مبتدئ",
+        "intermediate": "متوسط",
+        "advanced": "متقدم",
+    }.get(value, value)
+
+
 def cleanup_session(request: gr.Request) -> None:
-    """Release a user's tutor state when the browser session ends."""
     session_store.remove(request.session_hash if request else None)
 
 
-def format_progress(tutor) -> str:
+def format_progress(tutor, language: str = "english") -> str:
     progress = tutor.get_progress()
     mastery = float(progress["mastery_score"])
     attempts = int(progress["attempts"])
     next_difficulty = progress["next_difficulty"]
     weak_concepts = progress["weak_concepts"]
 
-    if weak_concepts:
-        rows = []
-        for item in weak_concepts:
-            rows.append(
+    if language == "arabic":
+        if weak_concepts:
+            rows = [
                 f"| {item['concept']} | {item['attempts']} | {float(item['mastery']):.0%} |"
+                for item in weak_concepts
+            ]
+            weak_section = (
+                "### مفاهيم تحتاج مراجعة\n\n"
+                "| المفهوم | المحاولات | الإتقان |\n"
+                "|---|---:|---:|\n" + "\n".join(rows)
             )
+        else:
+            weak_section = (
+                "### مفاهيم تحتاج مراجعة\n\n"
+                "لم يتم اكتشاف مفهوم ضعيف حتى الآن. أجب عن عدة أسئلة لبناء ملف تعلم."
+            )
+        return (
+            "## ملخص التعلم\n\n"
+            f"**الإتقان العام:** {mastery:.0%}  \n"
+            f"**عدد محاولات الاختبار:** {attempts}  \n"
+            f"**المستوى المقترح التالي:** `{_difficulty_label(next_difficulty, language)}`\n\n"
+            f"{weak_section}"
+        )
+
+    if weak_concepts:
+        rows = [
+            f"| {item['concept']} | {item['attempts']} | {float(item['mastery']):.0%} |"
+            for item in weak_concepts
+        ]
         weak_section = (
             "### Concepts to review\n\n"
             "| Concept | Attempts | Mastery |\n"
-            "|---|---:|---:|\n"
-            + "\n".join(rows)
+            "|---|---:|---:|\n" + "\n".join(rows)
         )
     else:
         weak_section = (
@@ -127,39 +163,64 @@ def format_progress(tutor) -> str:
     )
 
 
-def upload_pdf(file_path, request: gr.Request):
+def upload_pdf(file_path, language_choice, request: gr.Request):
+    language = _language(language_choice)
     if not file_path:
-        return "### No document selected\nChoose a PDF file, then click **Load study material**."
+        return (
+            "### لم يتم اختيار ملف\nاختر ملف PDF أولاً."
+            if language == "arabic"
+            else "### No document selected\nChoose a PDF file first."
+        )
 
     path = Path(str(file_path))
     if path.suffix.lower() != ".pdf":
-        return "### Unsupported file\nPlease upload a PDF document."
+        return "### ملف غير مدعوم\nيرجى رفع ملف PDF." if language == "arabic" else "### Unsupported file\nPlease upload a PDF document."
 
     session = _session(request)
     try:
         with session.lock:
             chunks = session.tutor.load_document(path.name, path.read_bytes())
+            document_language = session.tutor.document_language
     except Exception as exc:
-        return f"### Upload failed\n`{exc}`"
+        return f"### تعذر رفع الملف\n`{exc}`" if language == "arabic" else f"### Upload failed\n`{exc}`"
+
+    detected = "العربية" if document_language == "arabic" else "English" if document_language == "english" else "Unknown"
+    if language == "arabic":
+        return (
+            "### المستند جاهز\n\n"
+            f"**الملف:** {path.name}  \n"
+            f"**لغة المصدر المكتشفة:** {detected}  \n"
+            f"**عدد مقاطع المصدر المفهرسة:** {chunks}  \n\n"
+            "يمكنك الآن السؤال بالعربية أو الإنجليزية. سيبقى المستند وتقدم التعلم خاصين بجلسة المتصفح الحالية."
+        )
 
     return (
         "### Document ready\n\n"
         f"**File:** {path.name}  \n"
+        f"**Detected source language:** {detected}  \n"
         f"**Indexed source chunks:** {chunks}  \n\n"
-        "This document and its learner progress belong only to your current browser session. "
-        "You can now use **Ask Tutor** or **Adaptive Quiz**."
+        "You can now ask in English or Arabic. The document and learner progress belong only to your current browser session."
     )
 
 
-def ask_tutor(question, level, request: gr.Request):
+def ask_tutor(question, level, language_choice, request: gr.Request):
+    language = _language(language_choice)
     session = _session(request)
 
     with session.lock:
         tutor = session.tutor
         if tutor.document_name is None:
-            return "### Upload a PDF first\nThe tutor needs a source document before it can answer.", ""
+            return (
+                "### ارفع ملف PDF أولاً\nيحتاج المدرس الذكي إلى مصدر قبل أن يجيب."
+                if language == "arabic"
+                else "### Upload a PDF first\nThe tutor needs a source document before it can answer."
+            ), ""
         if not question or len(question.strip()) < 3:
-            return "### Enter a question\nAsk something specific about the uploaded material.", ""
+            return (
+                "### اكتب سؤالاً\nاكتب سؤالاً محدداً عن المادة المرفوعة."
+                if language == "arabic"
+                else "### Enter a question\nAsk something specific about the uploaded material."
+            ), ""
 
         try:
             answer, sources, mode = tutor.answer(
@@ -167,38 +228,49 @@ def ask_tutor(question, level, request: gr.Request):
                 top_k=3,
                 level=level,
                 use_llm=True,
+                language=language,
             )
         except Exception as exc:
-            return f"### Unable to answer\n`{exc}`", ""
+            return (f"### تعذر إنشاء الإجابة\n`{exc}`" if language == "arabic" else f"### Unable to answer\n`{exc}`"), ""
 
     evidence = []
     for source in sources:
-        evidence.append(
-            f"### PDF page {source['page']}\n"
-            f"**Retrieval score:** {source['score']}\n\n"
-            f"> {source['text']}"
-        )
+        heading = f"### صفحة PDF {source['page']}" if language == "arabic" else f"### PDF page {source['page']}"
+        score_label = "درجة الاسترجاع" if language == "arabic" else "Retrieval score"
+        evidence.append(f"{heading}\n**{score_label}:** {source['score']}\n\n> {source['text']}")
 
     source_text = "\n\n---\n\n".join(evidence)
-    mode_label = "Grounded Gemini" if mode == "gemini" else "Retrieval fallback"
-    response = (
-        "## Tutor response\n\n"
-        f"**Explanation level:** `{level}`  \n"
-        f"**Mode:** {mode_label}\n\n"
-        f"{answer}"
-    )
+    if language == "arabic":
+        mode_label = "Gemini موثّق بالمصدر" if mode == "gemini" else "استرجاع من المصدر"
+        response = (
+            "## إجابة المدرس الذكي\n\n"
+            f"**مستوى الشرح:** `{_difficulty_label(level, language)}`  \n"
+            f"**النمط:** {mode_label}\n\n"
+            f"{answer}"
+        )
+    else:
+        mode_label = "Grounded Gemini" if mode == "gemini" else "Retrieval fallback"
+        response = (
+            "## Tutor response\n\n"
+            f"**Explanation level:** `{level}`  \n"
+            f"**Mode:** {mode_label}\n\n"
+            f"{answer}"
+        )
     return response, source_text
 
 
-def generate_quiz_question(topic, difficulty, request: gr.Request):
+def generate_quiz_question(topic, difficulty, language_choice, request: gr.Request):
+    language = _language(language_choice)
     session = _session(request)
 
     with session.lock:
         tutor = session.tutor
         if tutor.document_name is None:
-            return None, "### Upload a PDF first\nA quiz must be generated from source material.", ""
+            message = "### ارفع ملف PDF أولاً\nيجب إنشاء الاختبار من مادة مصدرية." if language == "arabic" else "### Upload a PDF first\nA quiz must be generated from source material."
+            return None, message, ""
         if not topic or len(topic.strip()) < 3:
-            return None, "### Enter a quiz topic\nExample: *Climate Change Impacts in Kuwait*", ""
+            message = "### اكتب موضوع الاختبار\nمثال: تأثيرات تغير المناخ في الكويت" if language == "arabic" else "### Enter a quiz topic\nExample: *Climate Change Impacts in Kuwait*"
+            return None, message, ""
 
         try:
             questions = tutor.create_quiz(
@@ -206,16 +278,25 @@ def generate_quiz_question(topic, difficulty, request: gr.Request):
                 difficulty=difficulty,
                 count=1,
                 top_k=5,
+                language=language,
             )
         except Exception as exc:
-            return None, f"### Unable to generate a quiz\n`{exc}`", ""
+            message = f"### تعذر إنشاء الاختبار\n`{exc}`" if language == "arabic" else f"### Unable to generate a quiz\n`{exc}`"
+            return None, message, ""
 
     q = questions[0]
-    meta = (
-        f"**Concept:** {q['concept']}  \n"
-        f"**Difficulty:** `{difficulty}`  \n"
-        f"**Grounding source:** PDF page {q['page']}"
-    )
+    if language == "arabic":
+        meta = (
+            f"**المفهوم:** {q['concept']}  \n"
+            f"**الصعوبة:** `{_difficulty_label(difficulty, language)}`  \n"
+            f"**المصدر:** صفحة PDF {q['page']}"
+        )
+    else:
+        meta = (
+            f"**Concept:** {q['concept']}  \n"
+            f"**Difficulty:** `{difficulty}`  \n"
+            f"**Grounding source:** PDF page {q['page']}"
+        )
     return q["id"], f"## {q['question']}", meta
 
 
@@ -237,33 +318,48 @@ def grade_answer(question_id, student_answer, request: gr.Request):
         except Exception as exc:
             return f"### Unable to grade the answer\n`{exc}`", format_progress(tutor)
 
-        progress_text = format_progress(tutor)
+        language = result.get("language", "english")
+        progress_text = format_progress(tutor, language)
 
-    verdict = "Correct / strong answer" if result["correct"] else "Needs review"
-    feedback = (
-        f"## {verdict}\n\n"
-        f"**Score:** {result['score']:.0%}  \n"
-        f"**Concept:** {result['concept']}  \n"
-        f"**Source page:** {result['source_page']}\n\n"
-        f"### Tutor feedback\n{result['feedback']}\n\n"
-        f"### Recommended next step\n{result['review_recommendation']}"
-    )
+    if language == "arabic":
+        verdict = "إجابة قوية / صحيحة" if result["correct"] else "تحتاج إلى مراجعة"
+        feedback = (
+            f"## {verdict}\n\n"
+            f"**الدرجة:** {result['score']:.0%}  \n"
+            f"**المفهوم:** {result['concept']}  \n"
+            f"**صفحة المصدر:** {result['source_page']}\n\n"
+            f"### ملاحظات المدرس\n{result['feedback']}\n\n"
+            f"### الخطوة المقترحة التالية\n{result['review_recommendation']}"
+        )
+    else:
+        verdict = "Correct / strong answer" if result["correct"] else "Needs review"
+        feedback = (
+            f"## {verdict}\n\n"
+            f"**Score:** {result['score']:.0%}  \n"
+            f"**Concept:** {result['concept']}  \n"
+            f"**Source page:** {result['source_page']}\n\n"
+            f"### Tutor feedback\n{result['feedback']}\n\n"
+            f"### Recommended next step\n{result['review_recommendation']}"
+        )
     return feedback, progress_text
 
 
-def show_progress(request: gr.Request):
+def show_progress(language_choice, request: gr.Request):
+    language = _language(language_choice)
     session = _session(request)
     with session.lock:
-        return format_progress(session.tutor)
+        return format_progress(session.tutor, language)
 
 
-def personalized_review(concept, level, request: gr.Request):
+def personalized_review(concept, level, language_choice, request: gr.Request):
+    language = _language(language_choice)
     session = _session(request)
 
     with session.lock:
         tutor = session.tutor
         if tutor.document_name is None:
-            return "### Upload a PDF first\nPersonalized review must be grounded in a source document.", ""
+            message = "### ارفع ملف PDF أولاً\nيجب أن تكون المراجعة مرتبطة بمصدر." if language == "arabic" else "### Upload a PDF first\nPersonalized review must be grounded in a source document."
+            return message, ""
 
         selected_concept = concept.strip() if concept and concept.strip() else None
         selected_level = None if level == "auto" else level
@@ -273,88 +369,105 @@ def personalized_review(concept, level, request: gr.Request):
                 concept=selected_concept,
                 level=selected_level,
                 top_k=3,
+                language=language,
             )
         except Exception as exc:
-            return f"### Unable to create a review\n`{exc}`", ""
+            message = f"### تعذر إنشاء المراجعة\n`{exc}`" if language == "arabic" else f"### Unable to create a review\n`{exc}`"
+            return message, ""
 
     evidence = []
     for source in sources:
-        evidence.append(f"### PDF page {source['page']}\n\n> {source['text']}")
+        heading = f"### صفحة PDF {source['page']}" if language == "arabic" else f"### PDF page {source['page']}"
+        evidence.append(f"{heading}\n\n> {source['text']}")
 
-    mode_label = "Grounded Gemini" if mode == "gemini" else "Retrieval fallback"
-    header = (
-        f"## Review: {concept_name}\n\n"
-        f"**Level:** `{final_level}`  \n"
-        f"**Mode:** {mode_label}\n\n"
-        f"{answer}"
-    )
+    if language == "arabic":
+        mode_label = "Gemini موثّق بالمصدر" if mode == "gemini" else "استرجاع من المصدر"
+        header = (
+            f"## مراجعة: {concept_name}\n\n"
+            f"**المستوى:** `{_difficulty_label(final_level, language)}`  \n"
+            f"**النمط:** {mode_label}\n\n"
+            f"{answer}"
+        )
+    else:
+        mode_label = "Grounded Gemini" if mode == "gemini" else "Retrieval fallback"
+        header = (
+            f"## Review: {concept_name}\n\n"
+            f"**Level:** `{final_level}`  \n"
+            f"**Mode:** {mode_label}\n\n"
+            f"{answer}"
+        )
     return header, "\n\n---\n\n".join(evidence)
 
 
 with gr.Blocks(
-    title="AI Study Tutor | Source-Grounded Adaptive Learning",
+    title="AI Study Tutor | Bilingual Source-Grounded Learning",
     theme=gr.themes.Soft(),
     css=APP_CSS,
     delete_cache=(3600, 3600),
 ) as demo:
     gr.HTML(HERO_HTML)
 
-    gr.Markdown(
-        "**Recommended workflow:** Upload a PDF → Ask questions → Practice with a quiz → "
-        "Check progress → Review weak concepts."
-    )
+    with gr.Row():
+        with gr.Column(scale=3):
+            gr.Markdown(
+                "**Recommended workflow:** Upload a PDF → choose English or العربية → Ask questions → "
+                "Practice with a quiz → Check progress → Review weak concepts."
+            )
+        with gr.Column(scale=2):
+            language_choice = gr.Radio(
+                ["English", "العربية"],
+                value="English",
+                label="Tutor language / لغة المدرس",
+            )
 
     with gr.Tab("1 · Upload"):
         with gr.Row():
             with gr.Column(scale=3):
                 gr.Markdown("## Start with trusted study material")
                 gr.Markdown(
-                    "Upload one educational PDF. The tutor indexes the document and uses it as the "
-                    "evidence base for answers, quizzes, and personalized review."
+                    "Upload one educational PDF. The tutor detects its main language and uses it as the evidence base. "
+                    "You may then ask in English or Arabic, even when the PDF is in the other language."
                 )
-                pdf_file = gr.File(
-                    label="Study material (PDF)",
-                    file_types=[".pdf"],
-                    type="filepath",
-                )
+                pdf_file = gr.File(label="Study material (PDF)", file_types=[".pdf"], type="filepath")
                 upload_button = gr.Button("Load study material", variant="primary")
                 upload_status = gr.Markdown()
-                upload_button.click(upload_pdf, inputs=pdf_file, outputs=upload_status)
+                upload_button.click(upload_pdf, inputs=[pdf_file, language_choice], outputs=upload_status)
 
             with gr.Column(scale=2):
                 gr.Markdown(
                     "## What happens next?\n\n"
                     "1. Text is extracted page by page.\n"
-                    "2. The document is split into searchable chunks.\n"
-                    "3. Relevant passages are retrieved for each request.\n"
-                    "4. Gemini generates explanations only from retrieved evidence.\n\n"
+                    "2. The PDF's dominant language is detected.\n"
+                    "3. Cross-language questions are translated only for retrieval.\n"
+                    "4. Relevant passages are retrieved with TF-IDF.\n"
+                    "5. Gemini answers only from retrieved evidence in your selected language.\n\n"
                     "**Session privacy:** each browser session gets its own isolated PDF, quiz bank, and learner progress."
                 )
 
     with gr.Tab("2 · Ask Tutor"):
         with gr.Row():
             with gr.Column(scale=2):
-                gr.Markdown("## Ask a grounded question")
+                gr.Markdown("## Ask a grounded question / اسأل من المصدر")
                 question = gr.Textbox(
-                    label="Question",
-                    placeholder="Example: How is climate change expected to affect Kuwait's temperature and rainfall?",
+                    label="Question / السؤال",
+                    placeholder="How will climate change affect Kuwait?  |  شلون راح يأثر تغير المناخ على الكويت؟",
                     lines=4,
                 )
                 level = gr.Radio(
                     ["beginner", "intermediate", "advanced"],
                     value="intermediate",
-                    label="Explanation level",
+                    label="Explanation level / مستوى الشرح",
                 )
-                ask_button = gr.Button("Ask tutor", variant="primary")
+                ask_button = gr.Button("Ask tutor / اسأل", variant="primary")
 
             with gr.Column(scale=3):
                 answer_output = gr.Markdown(elem_classes=["answer-card"])
-                with gr.Accordion("View retrieved source evidence", open=False):
+                with gr.Accordion("View source evidence / عرض المصدر", open=False):
                     source_output = gr.Markdown()
 
         ask_button.click(
             ask_tutor,
-            inputs=[question, level],
+            inputs=[question, level, language_choice],
             outputs=[answer_output, source_output],
         )
 
@@ -363,27 +476,27 @@ with gr.Blocks(
 
         with gr.Row():
             with gr.Column(scale=2):
-                gr.Markdown("## Practice from the same source")
+                gr.Markdown("## Practice from the same source / اختبر نفسك")
                 topic = gr.Textbox(
-                    label="Quiz topic",
-                    placeholder="Example: Climate Change Impacts in Kuwait",
+                    label="Quiz topic / موضوع الاختبار",
+                    placeholder="Climate Change Impacts in Kuwait | تأثيرات تغير المناخ في الكويت",
                 )
                 difficulty = gr.Radio(
                     ["beginner", "intermediate", "advanced"],
                     value="beginner",
-                    label="Question difficulty",
+                    label="Question difficulty / صعوبة السؤال",
                 )
-                generate_button = gr.Button("Generate question", variant="primary")
+                generate_button = gr.Button("Generate question / أنشئ سؤال", variant="primary")
                 quiz_meta = gr.Markdown()
 
             with gr.Column(scale=3):
                 quiz_question = gr.Markdown()
                 student_answer = gr.Textbox(
-                    label="Your answer",
-                    placeholder="Write your answer in your own words...",
+                    label="Your answer / إجابتك",
+                    placeholder="Write your answer in your own words... / اكتب إجابتك بأسلوبك",
                     lines=5,
                 )
-                grade_button = gr.Button("Submit answer")
+                grade_button = gr.Button("Submit answer / صحح الإجابة")
 
         gr.Markdown("---")
         with gr.Row():
@@ -394,7 +507,7 @@ with gr.Blocks(
 
         generate_button.click(
             generate_quiz_question,
-            inputs=[topic, difficulty],
+            inputs=[topic, difficulty, language_choice],
             outputs=[quiz_id, quiz_question, quiz_meta],
         )
         grade_button.click(
@@ -405,51 +518,55 @@ with gr.Blocks(
 
     with gr.Tab("4 · Progress"):
         gr.Markdown(
-            "## Transparent learner model\n"
-            "The prototype uses recent quiz performance to estimate overall mastery, recommend the "
-            "next difficulty, and identify concepts that may need review."
+            "## Learning progress / تقدم التعلم\n"
+            "The learner model uses recent quiz performance to estimate mastery, recommend difficulty, "
+            "and identify concepts for review."
         )
-        progress_button = gr.Button("Refresh learning snapshot", variant="primary")
+        progress_button = gr.Button("Refresh progress / تحديث التقدم", variant="primary")
         progress_output = gr.Markdown()
-        progress_button.click(show_progress, outputs=progress_output)
+        progress_button.click(show_progress, inputs=language_choice, outputs=progress_output)
 
     with gr.Tab("5 · Personalized Review"):
         with gr.Row():
             with gr.Column(scale=2):
-                gr.Markdown("## Review what needs attention")
+                gr.Markdown("## Personalized review / مراجعة مخصصة")
                 gr.Markdown(
-                    "Leave the concept blank and the tutor will automatically select the weakest "
-                    "detected concept. You can also enter a concept manually."
+                    "Leave the concept blank to review the weakest detected concept automatically, "
+                    "or enter a concept manually."
                 )
                 review_concept = gr.Textbox(
-                    label="Concept (optional)",
-                    placeholder="Leave blank for automatic weak-concept review",
+                    label="Concept (optional) / المفهوم (اختياري)",
+                    placeholder="Leave blank for automatic review / اتركه فارغاً للمراجعة التلقائية",
                 )
                 review_level = gr.Dropdown(
                     ["auto", "beginner", "intermediate", "advanced"],
                     value="auto",
-                    label="Review level",
+                    label="Review level / مستوى المراجعة",
                 )
-                review_button = gr.Button("Create personalized review", variant="primary")
+                review_button = gr.Button("Create review / أنشئ مراجعة", variant="primary")
 
             with gr.Column(scale=3):
                 review_output = gr.Markdown(elem_classes=["answer-card"])
-                with gr.Accordion("View review source evidence", open=False):
+                with gr.Accordion("View review source / عرض مصدر المراجعة", open=False):
                     review_sources = gr.Markdown()
 
         review_button.click(
             personalized_review,
-            inputs=[review_concept, review_level],
+            inputs=[review_concept, review_level, language_choice],
             outputs=[review_output, review_sources],
         )
 
     with gr.Tab("About"):
         gr.Markdown(
             "## Research motivation\n\n"
-            "AI Study Tutor is an educational AI prototype exploring how source-grounded language models "
-            "can support learning without replacing educators. The system combines retrieval-augmented "
-            "generation, adaptive explanation levels, quiz generation, answer feedback, transparent "
-            "mastery tracking, weak-concept detection, and personalized review.\n\n"
+            "AI Study Tutor explores human-centered, source-grounded AI for education. Version 0.8 adds "
+            "bilingual English/Arabic tutoring and cross-language retrieval while preserving visible source evidence.\n\n"
+            "### Bilingual retrieval design\n\n"
+            "- The uploaded PDF's dominant script is detected as English or Arabic.\n"
+            "- If the learner asks in the other language, Gemini translates **only the retrieval query** into the source language.\n"
+            "- TF-IDF retrieves passages from the original PDF.\n"
+            "- The final explanation, quiz, grading feedback, or review is generated in the learner's selected language using only retrieved evidence.\n"
+            "- Retrieved source passages remain visible in their original language for verification.\n\n"
             "### Design principles\n\n"
             "- **Ground before generating:** retrieve evidence from the uploaded PDF first.\n"
             "- **Make evidence visible:** expose source pages and retrieved passages.\n"
@@ -459,14 +576,13 @@ with gr.Blocks(
             "- **Keep the model transparent:** the mastery score is intentionally simple and inspectable.\n\n"
             "### Prototype limitation\n\n"
             "The mastery model is a research prototype, not a validated educational assessment instrument. "
-            "Generated answers and grading should be checked against the displayed source evidence and, "
-            "where appropriate, an instructor. Session state is stored only in server memory and resets when "
-            "the browser session or Space runtime ends."
+            "Cross-language retrieval currently uses query translation plus lexical TF-IDF retrieval rather than multilingual embeddings. "
+            "Generated answers and grading should be checked against the displayed source evidence."
         )
 
     gr.HTML(
         "<div class='footer-note'>"
-        "AI Study Tutor · Human-Centered AI for Education · Source-grounded adaptive learning prototype"
+        "AI Study Tutor · Human-Centered AI for Education · English + العربية · Source-grounded adaptive learning"
         "</div>"
     )
 
