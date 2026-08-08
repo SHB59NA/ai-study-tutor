@@ -1,0 +1,93 @@
+{
+  "dataset_name": "Kuwait BUR Retrieval Evaluation v1",
+  "source_document": "State of Kuwait - BUR.pdf",
+  "description": "Small hand-checked benchmark for page-aware retrieval and out-of-source rejection. Expected pages use physical PDF page numbers, matching pypdf enumeration.",
+  "cases": [
+    {
+      "id": "climate_projection",
+      "type": "in_scope",
+      "question": "How is climate change expected to affect Kuwait's temperature and rainfall by 2071-2100 under RCP8.5?",
+      "expected_pages": [68],
+      "answer_facts": ["temperature rises 4.3 to 4.5 degrees Celsius", "western annual rainfall decreases about 15 to 18 percent"]
+    },
+    {
+      "id": "priority_vulnerability_sectors",
+      "type": "in_scope",
+      "question": "Which priority sectors are included in Kuwait's climate vulnerability assessment?",
+      "expected_pages": [68],
+      "answer_facts": ["climate modelling", "water resources", "sea level rise and coastal developments", "public health and dust storms"]
+    },
+    {
+      "id": "water_resources",
+      "type": "in_scope",
+      "question": "What factors make water resource management a major challenge in Kuwait, and which adaptation policies were analyzed?",
+      "expected_pages": [69],
+      "answer_facts": ["population growth and urbanization", "hyper-arid environment and low rainfall", "limited fresh groundwater", "water tariffs", "water efficiency", "leak reduction", "irrigation efficiency"]
+    },
+    {
+      "id": "sea_level_rise",
+      "type": "in_scope",
+      "question": "What are the main sea-level-rise risks for Kuwait's coastal areas and Boubyan Island?",
+      "expected_pages": [69],
+      "answer_facts": ["wetland flooding", "aquifer and agricultural soil contamination", "erosion", "habitat loss", "roughly half of Boubyan Island inundated in the highest scenario"]
+    },
+    {
+      "id": "public_health",
+      "type": "in_scope",
+      "question": "How could climate change affect public health in Kuwait?",
+      "expected_pages": [69],
+      "answer_facts": ["heat stress", "cardiovascular disease", "respiratory disease", "more frequent dust storms"]
+    },
+    {
+      "id": "energy_sector_share",
+      "type": "in_scope",
+      "question": "Which sector produced most of Kuwait's greenhouse gas emissions in 2016, and approximately what share did it represent?",
+      "expected_pages": [52],
+      "answer_facts": ["energy sector", "95.6 percent"]
+    },
+    {
+      "id": "co2_share",
+      "type": "in_scope",
+      "question": "What share of Kuwait's total greenhouse gas emissions in 2016 was carbon dioxide?",
+      "expected_pages": [52],
+      "answer_facts": ["97.2 percent", "83910.932 Gg"]
+    },
+    {
+      "id": "energy_activity_breakdown",
+      "type": "in_scope",
+      "question": "Within Kuwait's 2016 energy emissions, what shares were associated with electricity and desalinated water production and with transport?",
+      "expected_pages": [53],
+      "answer_facts": ["electricity and desalinated water production about 58 percent", "transport about 18 percent"]
+    },
+    {
+      "id": "oos_world_cup",
+      "type": "out_of_scope",
+      "question": "Who won the FIFA World Cup in 2022?",
+      "expected_pages": []
+    },
+    {
+      "id": "oos_france_capital",
+      "type": "out_of_scope",
+      "question": "What is the capital of France?",
+      "expected_pages": []
+    },
+    {
+      "id": "oos_hamlet",
+      "type": "out_of_scope",
+      "question": "Who wrote Hamlet?",
+      "expected_pages": []
+    },
+    {
+      "id": "oos_speed_of_light",
+      "type": "out_of_scope",
+      "question": "What is the speed of light in vacuum?",
+      "expected_pages": []
+    },
+    {
+      "id": "oos_planet",
+      "type": "out_of_scope",
+      "question": "Which planet is closest to the Sun?",
+      "expected_pages": []
+    }
+  ]
+}
