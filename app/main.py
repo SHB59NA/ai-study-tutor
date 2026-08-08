@@ -2,18 +2,21 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 
 from app.models import (
     AnswerResponse,
+    ProgressResponse,
     QuestionRequest,
     QuizAnswerRequest,
     QuizGradeResponse,
     QuizRequest,
     QuizResponse,
+    ReviewRequest,
+    ReviewResponse,
 )
 from app.tutor import StudyTutor
 
 app = FastAPI(
     title="AI Study Tutor",
     description="A source-grounded AI tutor for educational materials.",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 tutor = StudyTutor()
@@ -23,12 +26,13 @@ tutor = StudyTutor()
 def root() -> dict:
     return {
         "name": "AI Study Tutor",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "status": "ready",
         "document_loaded": tutor.document_name,
         "llm_available": tutor.llm_available,
         "mastery_score": round(tutor.progress.mastery_score, 3),
         "recommended_difficulty": tutor.progress.next_difficulty,
+        "weak_concepts": tutor.progress.weak_concepts,
     }
 
 
@@ -115,3 +119,31 @@ def grade_quiz_answer(request: QuizAnswerRequest) -> QuizGradeResponse:
         raise HTTPException(status_code=500, detail="Unable to grade the answer.") from exc
 
     return QuizGradeResponse(**result)
+
+
+@app.get("/progress", response_model=ProgressResponse)
+def learner_progress() -> ProgressResponse:
+    return ProgressResponse(**tutor.get_progress())
+
+
+@app.post("/review", response_model=ReviewResponse)
+def personalized_review(request: ReviewRequest) -> ReviewResponse:
+    if tutor.document_name is None:
+        raise HTTPException(status_code=400, detail="Upload a PDF before requesting a review.")
+
+    try:
+        concept, answer, sources, mode, level = tutor.personalized_review(
+            concept=request.concept,
+            level=request.level,
+            top_k=request.top_k,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return ReviewResponse(
+        concept=concept,
+        answer=answer,
+        level=level,
+        mode=mode,
+        sources=sources,
+    )
