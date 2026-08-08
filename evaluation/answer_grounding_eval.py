@@ -404,7 +404,7 @@ def print_report(results: list[AnswerCaseResult], metrics: dict[str, Any]) -> No
     )
     print(
         "Out-of-source refusal rate: "
-        f"{_format_rate(metrics['out_of_source_refusal_rate'])}"
+        f"{_format_rate(metrics['out_of_scope_refusal_rate'])}"
     )
     print(
         "Overall evaluated-case pass rate: "
