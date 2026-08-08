@@ -37,6 +37,7 @@ class QuizRequest(BaseModel):
 class QuizQuestion(BaseModel):
     id: str
     question: str
+    concept: str
     page: int
 
 
@@ -51,10 +52,40 @@ class QuizAnswerRequest(BaseModel):
     student_answer: str = Field(min_length=1, max_length=3000)
 
 
+class WeakConcept(BaseModel):
+    concept: str
+    attempts: int
+    mastery: float
+
+
 class QuizGradeResponse(BaseModel):
     score: float
     correct: bool
     feedback: str
+    concept: str
+    review_recommendation: str
     source_page: int
     mastery_score: float
     next_difficulty: ExplanationLevel
+    weak_concepts: list[WeakConcept]
+
+
+class ProgressResponse(BaseModel):
+    mastery_score: float
+    next_difficulty: ExplanationLevel
+    attempts: int
+    weak_concepts: list[WeakConcept]
+
+
+class ReviewRequest(BaseModel):
+    concept: str | None = Field(default=None, max_length=300)
+    level: ExplanationLevel | None = None
+    top_k: int = Field(default=3, ge=1, le=5)
+
+
+class ReviewResponse(BaseModel):
+    concept: str
+    answer: str
+    level: ExplanationLevel
+    mode: AnswerMode
+    sources: list[SourceChunk]
