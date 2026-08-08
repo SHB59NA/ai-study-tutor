@@ -26,17 +26,18 @@ This project explores how artificial intelligence can support students without r
 
 Artificial Intelligence for Education, Human-Centered AI, NLP, Retrieval-Augmented Generation (RAG), intelligent tutoring systems, adaptive learning, and personalized educational support.
 
-## Version 0.5 — Interactive Student Demo
+## Version 0.6 — Professional Portfolio Demo
 
-The project now includes an interactive Gradio interface in `demo.py`, so the complete learning workflow can be tested without manually calling API endpoints.
+The Gradio interface has been redesigned as a polished student-facing demo with a clearer learning workflow and research framing.
 
-The demo includes five learning areas:
+The interface includes:
 
 1. **Upload** — load and index an educational PDF.
 2. **Ask Tutor** — ask grounded questions at beginner, intermediate, or advanced level and inspect retrieved evidence.
 3. **Adaptive Quiz** — generate a source-grounded question, submit an answer, receive feedback, and update learner mastery.
-4. **Progress** — inspect overall mastery, attempts, recommended difficulty, and weak concepts.
-5. **Personalized Review** — automatically review the weakest detected concept or choose a concept manually.
+4. **Progress** — view overall mastery, attempts, recommended difficulty, and weak concepts in a readable learning snapshot.
+5. **Personalized Review** — automatically review the weakest detected concept or choose one manually.
+6. **About** — explain the research motivation, design principles, and prototype limitations.
 
 ## Learning Pipeline
 
@@ -68,6 +69,14 @@ Transparent learner model
 ```
 
 The mastery model is intentionally simple and transparent for this research prototype. It is not a validated educational assessment model.
+
+## Design Principles
+
+- **Ground before generating** — retrieve evidence from the uploaded PDF before generation.
+- **Visible evidence** — expose page references and retrieved passages to the learner.
+- **Learner adaptation** — vary explanation depth and quiz difficulty.
+- **Targeted support** — detect weak concepts and recommend focused review.
+- **Human-centered use** — support educators and learners rather than positioning the system as a replacement for instruction.
 
 ## Tech Stack
 
@@ -114,8 +123,6 @@ Launch the interface:
 !python demo.py
 ```
 
-Gradio will provide a temporary public demo link. Open that link to use the tutor through the graphical interface.
-
 ## Project Structure
 
 ```text
@@ -154,6 +161,6 @@ The long-term goal is to build a human-centered AI tutor that helps learners und
 
 ## Status
 
-**Version 0.5 — Interactive student demo**
+**Version 0.6 — Professional portfolio demo**
 
 Active development.
