@@ -34,6 +34,7 @@ class AnswerCaseResult:
     citation_support_rate: float
     answer: str
     reason: str
+    generation_error: str | None = None
 
 
 def load_dataset(path: str | Path) -> dict[str, Any]:
@@ -81,10 +82,6 @@ def _segments(text: str) -> list[str]:
         if not clean:
             continue
 
-        # A normal sentence boundary may be ". Next", but PDF citations contain
-        # the same punctuation pattern internally: "[p. 68]". Do not split on
-        # whitespace immediately following "p." so a fact and its citation stay
-        # in the same deterministic evaluation segment.
         parts = re.split(
             r"(?<!p\.)(?<=[.!?])\s+(?=[A-Z0-9])",
             clean,
@@ -94,20 +91,35 @@ def _segments(text: str) -> list[str]:
     return segments or [text]
 
 
+def _pattern_has_expected_citation(
+    answer: str,
+    pattern: str,
+    expected_pages: list[int],
+) -> bool:
+    """Check whether one required fact pattern is locally supported by an expected page."""
+    expected = set(expected_pages)
+    for segment in _segments(answer):
+        if not re.search(pattern, segment, flags=re.IGNORECASE):
+            continue
+        cited = set(GeminiTutor.cited_pages(segment))
+        if cited.intersection(expected):
+            return True
+    return False
+
+
 def evaluate_fact(answer: str, fact: dict[str, Any]) -> FactResult:
     patterns = [str(item) for item in fact["patterns"]]
     expected_pages = [int(page) for page in fact["citation_pages"]]
     covered = _matches_patterns(answer, patterns)
 
-    citation_supported = False
-    if covered:
-        for segment in _segments(answer):
-            if not _matches_patterns(segment, patterns):
-                continue
-            cited = set(GeminiTutor.cited_pages(segment))
-            if cited.intersection(expected_pages):
-                citation_supported = True
-                break
+    # A fact can legitimately be expressed across multiple sentences, e.g.
+    # "Energy activities were dominant [p. 50]. They represented 95.6% [p. 50]."
+    # Require every fact pattern to be locally backed by an expected page rather
+    # than requiring all patterns and the citation to appear in one sentence.
+    citation_supported = covered and all(
+        _pattern_has_expected_citation(answer, pattern, expected_pages)
+        for pattern in patterns
+    )
 
     return FactResult(
         fact_id=str(fact["id"]),
@@ -122,6 +134,7 @@ def evaluate_answer_case(
     answer: str,
     sources: list[dict],
     mode: str,
+    generation_error: str | None = None,
 ) -> AnswerCaseResult:
     source_pages = sorted({int(source["page"]) for source in sources})
     cited_pages = sorted(set(GeminiTutor.cited_pages(answer)))
@@ -148,6 +161,7 @@ def evaluate_answer_case(
             citation_support_rate=1.0 if passed else 0.0,
             answer=answer,
             reason=reason,
+            generation_error=generation_error,
         )
 
     fact_results = [evaluate_fact(answer, fact) for fact in case["expected_facts"]]
@@ -166,6 +180,8 @@ def evaluate_answer_case(
     reasons: list[str] = []
     if mode != "gemini":
         reasons.append(f"expected grounded Gemini mode, got {mode}")
+        if generation_error:
+            reasons.append(f"generation error: {generation_error}")
     if fact_coverage < 1.0:
         missing = [item.fact_id for item in fact_results if not item.covered]
         reasons.append(f"missing expected fact(s): {missing}")
@@ -191,6 +207,7 @@ def evaluate_answer_case(
         citation_support_rate=round(citation_support_rate, 4),
         answer=answer,
         reason="; ".join(reasons) if reasons else "all expected facts and citations passed",
+        generation_error=generation_error,
     )
 
 
@@ -251,6 +268,7 @@ def evaluate_pdf(
                 answer=answer,
                 sources=sources,
                 mode=mode,
+                generation_error=tutor.last_generation_error,
             )
         )
 
@@ -272,6 +290,8 @@ def print_report(results: list[AnswerCaseResult], metrics: dict[str, Any]) -> No
             print(f"  citation support: {item.citation_support_rate:.1%}")
         if item.invalid_citation_pages:
             print(f"  invalid citations: {item.invalid_citation_pages}")
+        if item.generation_error:
+            print(f"  generation error: {item.generation_error}")
         print(f"  {item.reason}")
 
     print("\nMetrics")
