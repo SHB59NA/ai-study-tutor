@@ -7,7 +7,7 @@ sdk: gradio
 python_version: "3.10"
 app_file: app.py
 pinned: false
-short_description: AI-powered study tutor for personalized, source-grounded learning.
+short_description: Adaptive AI tutor for source-grounded learning.
 tags:
   - education
   - ai
