@@ -69,7 +69,7 @@ class StudyTutor:
         base_results: list,
         top_k: int,
     ) -> list:
-        """Add focused evidence for distinct parts of a complex question."""
+        """Add balanced focused evidence for distinct parts of a complex question."""
         if not self.llm.available:
             return base_results
 
@@ -82,22 +82,32 @@ class StudyTutor:
         except Exception:
             return base_results
 
-        # Keep the initial ranking first, then add new pages discovered by the
-        # focused queries. Limiting to at most 6 pages keeps generation context
-        # compact while allowing a multi-part question to gather missing evidence.
+        # Keep the initial ranking, but do not let the first expanded query consume
+        # every remaining source slot. Search every facet first, then merge results
+        # round-robin by rank so each distinct information need gets a chance to
+        # contribute evidence before lower-ranked results from one facet are added.
         max_sources = min(6, max(top_k, top_k * 2))
         merged = list(base_results)
         seen_pages = {chunk.page for chunk, _ in merged}
+        focused_groups: list[list] = []
 
         for query in expanded_queries:
             try:
                 focused = self.index.search(query, top_k=top_k)
             except Exception:
                 continue
+            if focused:
+                focused_groups.append(focused)
 
-            for chunk, score in focused:
+        for rank in range(top_k):
+            for focused in focused_groups:
+                if rank >= len(focused):
+                    continue
+
+                chunk, score = focused[rank]
                 if chunk.page in seen_pages:
                     continue
+
                 merged.append((chunk, score))
                 seen_pages.add(chunk.page)
                 if len(merged) >= max_sources:
