@@ -3,6 +3,7 @@ from uuid import uuid4
 from app.learner import LearnerProgress
 from app.llm import GeminiTutor
 from app.retrieval import DocumentIndex
+from app.upload_validation import validate_pdf_upload
 
 
 class StudyTutor:
@@ -22,6 +23,7 @@ class StudyTutor:
         return self.index.language
 
     def load_document(self, filename: str, data: bytes) -> int:
+        validate_pdf_upload(filename, data)
         chunk_count = self.index.load_pdf(data)
         self.document_name = filename
         self.quiz_bank.clear()
