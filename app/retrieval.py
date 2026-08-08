@@ -18,7 +18,7 @@ class DocumentIndex:
     """Page-aware lexical index with a conservative relevance gate."""
 
     MIN_RELEVANCE_SCORE = 0.08
-    LOW_COVERAGE_THRESHOLD = 0.25
+    LOW_COVERAGE_THRESHOLD = 0.60
     LOW_COVERAGE_SCORE_OVERRIDE = 0.35
 
     def __init__(self) -> None:
@@ -116,6 +116,10 @@ class DocumentIndex:
         if max_score < threshold:
             return []
 
+        # Require most informative query terms to exist somewhere in the source.
+        # This rejects questions that overlap on only one generic word (for
+        # example "capital" or "light") while retaining an override for an
+        # unusually strong lexical match.
         coverage = self._query_coverage(question)
         if (
             coverage < self.LOW_COVERAGE_THRESHOLD
