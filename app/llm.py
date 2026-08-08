@@ -120,9 +120,10 @@ Use ONLY the supplied PDF context. Do not use outside knowledge.
 Return ONLY valid JSON as an array. Each item must have exactly these keys:
 - question: string
 - answer: string
+- concept: short string naming the specific knowledge concept being tested
 - page: integer
 
-The answer must be directly supported by the context. The page must be one of these pages: {allowed_pages}.
+The answer and concept must be directly supported by the context. The page must be one of these pages: {allowed_pages}.
 Do not reveal the answer inside the question.
 
 PDF CONTEXT:
@@ -144,12 +145,20 @@ PDF CONTEXT:
                 continue
             question = str(item.get("question", "")).strip()
             answer = str(item.get("answer", "")).strip()
+            concept = str(item.get("concept", "")).strip()
             try:
                 page = int(item.get("page"))
             except (TypeError, ValueError):
                 continue
-            if question and answer and page in allowed_pages:
-                valid_items.append({"question": question, "answer": answer, "page": page})
+            if question and answer and concept and page in allowed_pages:
+                valid_items.append(
+                    {
+                        "question": question,
+                        "answer": answer,
+                        "concept": concept,
+                        "page": page,
+                    }
+                )
 
         if not valid_items:
             raise RuntimeError("No valid grounded quiz questions were generated.")
