@@ -1,0 +1,126 @@
+{
+  "dataset_name": "Kuwait BUR Answer Grounding Evaluation v1",
+  "source_document": "State of Kuwait - BUR.pdf",
+  "description": "Small hand-checked benchmark for generated-answer fact coverage, citation validity, expected citation support, and unsupported-question refusal. Expected pages use physical PDF page numbers.",
+  "cases": [
+    {
+      "id": "energy_sector_share",
+      "type": "in_scope",
+      "question": "Which sector produced most of Kuwait's greenhouse gas emissions in 2016, and approximately what share did it represent?",
+      "level": "beginner",
+      "expected_facts": [
+        {
+          "id": "energy_dominant",
+          "patterns": ["energy(?:-related activities| sector)", "95\\.6"],
+          "citation_pages": [50, 52]
+        }
+      ]
+    },
+    {
+      "id": "co2_share",
+      "type": "in_scope",
+      "question": "What share of Kuwait's total greenhouse gas emissions in 2016 was carbon dioxide, and what was the reported amount?",
+      "level": "beginner",
+      "expected_facts": [
+        {
+          "id": "co2_share",
+          "patterns": ["97\\.2", "83\\s*,?\\s*910\\.932|83910\\.932"],
+          "citation_pages": [52]
+        }
+      ]
+    },
+    {
+      "id": "climate_projection",
+      "type": "in_scope",
+      "question": "How is climate change expected to affect Kuwait's temperature and rainfall by 2071-2100 under RCP8.5?",
+      "level": "beginner",
+      "expected_facts": [
+        {
+          "id": "temperature_projection",
+          "patterns": ["4\\.3", "4\\.5"],
+          "citation_pages": [68]
+        },
+        {
+          "id": "rainfall_projection",
+          "patterns": ["15\\s*%", "18\\s*%"],
+          "citation_pages": [68]
+        }
+      ]
+    },
+    {
+      "id": "sea_level_rise",
+      "type": "in_scope",
+      "question": "What are the main sea-level-rise risks for Kuwait's coastal areas and Boubyan Island?",
+      "level": "beginner",
+      "expected_facts": [
+        {
+          "id": "boubyan_inundation",
+          "patterns": ["boubyan", "half", "inundat|underwater"],
+          "citation_pages": [69]
+        },
+        {
+          "id": "kuwait_bay_risk",
+          "patterns": ["kuwait bay", "doha port"],
+          "citation_pages": [69]
+        }
+      ]
+    },
+    {
+      "id": "public_health",
+      "type": "in_scope",
+      "question": "How could climate change affect public health in Kuwait?",
+      "level": "beginner",
+      "expected_facts": [
+        {
+          "id": "heat_stress",
+          "patterns": ["heat stress"],
+          "citation_pages": [10, 69]
+        },
+        {
+          "id": "dust_health",
+          "patterns": ["cardiovascular", "respiratory", "dust storm"],
+          "citation_pages": [10, 69]
+        }
+      ]
+    },
+    {
+      "id": "multi_part_climate",
+      "type": "in_scope",
+      "question": "How is climate change expected to affect Kuwait's temperature and rainfall, coastal areas, and public health?",
+      "level": "beginner",
+      "expected_facts": [
+        {
+          "id": "temperature_projection",
+          "patterns": ["4\\.3", "4\\.5"],
+          "citation_pages": [68]
+        },
+        {
+          "id": "rainfall_projection",
+          "patterns": ["15\\s*%", "18\\s*%"],
+          "citation_pages": [68]
+        },
+        {
+          "id": "boubyan_inundation",
+          "patterns": ["boubyan", "half", "inundat|underwater"],
+          "citation_pages": [69]
+        },
+        {
+          "id": "heat_stress",
+          "patterns": ["heat stress"],
+          "citation_pages": [10, 69]
+        },
+        {
+          "id": "dust_health",
+          "patterns": ["cardiovascular", "respiratory", "dust storm"],
+          "citation_pages": [10, 69]
+        }
+      ]
+    },
+    {
+      "id": "oos_world_cup",
+      "type": "out_of_scope",
+      "question": "Who won the FIFA World Cup in 2022?",
+      "level": "beginner"
+    }
+  ]
+}
