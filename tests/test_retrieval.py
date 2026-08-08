@@ -37,7 +37,8 @@ def _english_test_index() -> DocumentIndex:
             page=20,
             text=(
                 "The report discusses greenhouse gas emissions, adaptation planning, and environmental policy "
-                "in Kuwait and around the world."
+                "in Kuwait and around the world. Kuwait City is the capital and the document also discusses "
+                "sunlight, solar energy, infrastructure, transport, and development planning."
             ),
         ),
     ]
@@ -60,4 +61,16 @@ def test_retrieval_accepts_supported_question():
 def test_retrieval_rejects_unrelated_fifa_question():
     index = _english_test_index()
     results = index.search("Who won the FIFA World Cup in 2022?")
+    assert results == []
+
+
+def test_retrieval_rejects_partial_capital_overlap():
+    index = _english_test_index()
+    results = index.search("What is the capital of France?")
+    assert results == []
+
+
+def test_retrieval_rejects_partial_light_overlap():
+    index = _english_test_index()
+    results = index.search("What is the speed of light in vacuum?")
     assert results == []
