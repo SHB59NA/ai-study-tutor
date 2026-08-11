@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Environment variables / API keys
+.env
+.env.*
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE / Editors
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Python build files
+build/
+dist/
+*.egg-info/
+
+# Test / coverage files
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local data and uploaded documents
+data/
+uploads/
+documents/
+
+# Vector databases / indexes
+vector_store/
+chroma_db/
+faiss_index/
+
+# Secrets and credentials
+credentials.json
+secrets.json
+api_keys.txt
