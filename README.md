@@ -4,11 +4,13 @@
 
 An English/Arabic study assistant for **one text-based PDF per session**. It retrieves page-linked passages, optionally uses Gemini to explain them, and supports source-based quizzes and practice feedback.
 
+**ابدئي بالعربي:** [دليل التشغيل والتجربة والنتائج الموثقة](docs/START_HERE_AR.md).
+
 **Implemented retrieval is word + character TF-IDF, not neural embeddings, LangChain, or a vector database.** Cross-language retrieval uses optional Gemini query translation. Source passages remain in the document's original language.
 
 ## Try it without an API key
 
-Python 3.11–3.13 is the intended environment; use a virtual environment.
+Python 3.11–3.13 is the intended environment; use a virtual environment. The linked GitHub Actions run below was verified on Python 3.11.
 
 ```bash
 python -m venv .venv
@@ -18,6 +20,8 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 python app.py
 ```
+
+For Windows commands that do not require activating a PowerShell script, see the [Arabic quick start](docs/START_HERE_AR.md).
 
 Open **http://127.0.0.1:7860**, press **Use fictional sample**, select **Ask Tutor**, and ask:
 
@@ -48,6 +52,14 @@ Checking **Enable Gemini** sends the question and retrieved excerpts to Google. 
 A citation or matching number **does not prove semantic correctness**. Check generated answers against the source. Same-language retrieval works without a provider; cross-language understanding does not.
 
 ## Validation and reproducible evidence
+
+[Verified CI run: 36764903878](https://github.com/SHB59NA/ai-study-tutor/actions/runs/36764903878) tested the runtime implementation at `8b2e963` against the then-current base on 30 September 2026:
+
+- **115 software tests passed; 81% line coverage of `app`.** One dependency deprecation warning was reported.
+- **Browser smoke passed:** sample PDF loaded, offline retrieval performed, source page displayed, and screenshots captured.
+- The developer-authored retrieval fixture found the expected page in **10/10** in-scope cases and rejected **3/4** out-of-scope cases. The salary question remains a documented failure.
+
+These are software/fixture checks, **not** live Gemini answer accuracy, educational effectiveness, or independently validated performance. No live provider key was used. See the run's `validation-results` artifact for reports and screenshots; artifact retention is temporary.
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -89,6 +101,7 @@ Visit **http://127.0.0.1:8000/docs**. First call `POST /sessions`, then supply t
 
 ## Project guide
 
+- [ابدئي من هنا: تشغيل Windows وتجربة المشروع](docs/START_HERE_AR.md)
 - [Architecture and engineering decisions](ARCHITECTURE.md)
 - [Evaluation methodology and limitations](docs/EVALUATION.md)
 - [Deployment and configuration](docs/DEPLOYMENT.md)
