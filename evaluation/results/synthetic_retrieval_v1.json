@@ -1,0 +1,254 @@
+{
+  "benchmark": "Fictional IT Handbook - developer smoke benchmark v1",
+  "scope": "Local English PDF extraction/retrieval only. NOT generated-answer accuracy or educational effectiveness.",
+  "independent_test_set": false,
+  "external_model_calls": 0,
+  "source_pdf_sha256": "37a039602e4fcfbab64391cd3c674ae2c2753e77b96cf2c847be7095536e311c",
+  "dataset_sha256": "87a22dcd1c1368392d2d781a27d6975704e6158548a89cb5465c44218ce27c5f",
+  "environment": {
+    "python": "3.13.5",
+    "pypdf": "5.9.0",
+    "scikit-learn": "1.8.0",
+    "numpy": "2.3.5"
+  },
+  "retrieval_config": {
+    "top_k": 3,
+    "chunk_size": 900,
+    "overlap": 150,
+    "minimum_score": 0.08,
+    "coverage_threshold": 0.6,
+    "coverage_override": 0.35
+  },
+  "metrics": {
+    "total_cases": 14,
+    "in_scope_cases": 10,
+    "out_of_scope_cases": 4,
+    "top3_page_hit_rate": 1.0,
+    "out_of_scope_rejection_rate": 0.75,
+    "overall_case_pass_rate": 0.9286
+  },
+  "results": [
+    {
+      "case_id": "reset",
+      "case_type": "in_scope",
+      "question": "How do staff reset forgotten passwords?",
+      "passed": true,
+      "expected_pages": [
+        1
+      ],
+      "retrieved_pages": [
+        1
+      ],
+      "retrieved_scores": [
+        0.3286
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "identity",
+      "case_type": "in_scope",
+      "question": "What happens before restoring account access?",
+      "passed": true,
+      "expected_pages": [
+        1
+      ],
+      "retrieved_pages": [
+        1,
+        2,
+        4
+      ],
+      "retrieved_scores": [
+        0.374,
+        0.1178,
+        0.0813
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "factor",
+      "case_type": "in_scope",
+      "question": "What does multifactor authentication require?",
+      "passed": true,
+      "expected_pages": [
+        1
+      ],
+      "retrieved_pages": [
+        1,
+        4
+      ],
+      "retrieved_scores": [
+        0.3397,
+        0.1038
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "incident",
+      "case_type": "in_scope",
+      "question": "What is an incident?",
+      "passed": true,
+      "expected_pages": [
+        2
+      ],
+      "retrieved_pages": [
+        2,
+        4
+      ],
+      "retrieved_scores": [
+        0.4836,
+        0.0983
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "request",
+      "case_type": "in_scope",
+      "question": "What is a service request?",
+      "passed": true,
+      "expected_pages": [
+        2
+      ],
+      "retrieved_pages": [
+        2,
+        1
+      ],
+      "retrieved_scores": [
+        0.2824,
+        0.1801
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "p1",
+      "case_type": "in_scope",
+      "question": "Which incidents affect the whole training center?",
+      "passed": true,
+      "expected_pages": [
+        2
+      ],
+      "retrieved_pages": [
+        2,
+        1
+      ],
+      "retrieved_scores": [
+        0.5157,
+        0.128
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "network",
+      "case_type": "in_scope",
+      "question": "Where are network incidents assigned?",
+      "passed": true,
+      "expected_pages": [
+        2
+      ],
+      "retrieved_pages": [
+        2
+      ],
+      "retrieved_scores": [
+        0.4991
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "key",
+      "case_type": "in_scope",
+      "question": "What does a primary key identify?",
+      "passed": true,
+      "expected_pages": [
+        3
+      ],
+      "retrieved_pages": [
+        3,
+        4
+      ],
+      "retrieved_scores": [
+        0.2006,
+        0.0925
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "backup",
+      "case_type": "in_scope",
+      "question": "How does a backup support recovery?",
+      "passed": true,
+      "expected_pages": [
+        3
+      ],
+      "retrieved_pages": [
+        3
+      ],
+      "retrieved_scores": [
+        0.3266
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "citation",
+      "case_type": "in_scope",
+      "question": "Does a page citation prove a claim is correct?",
+      "passed": true,
+      "expected_pages": [
+        4
+      ],
+      "retrieved_pages": [
+        4
+      ],
+      "retrieved_scores": [
+        0.3443
+      ],
+      "reason": "expected source page found in retrieved evidence"
+    },
+    {
+      "case_id": "astronomy",
+      "case_type": "out_of_scope",
+      "question": "How many moons does Jupiter have?",
+      "passed": true,
+      "expected_pages": [],
+      "retrieved_pages": [],
+      "retrieved_scores": [],
+      "reason": "correctly rejected as unsupported"
+    },
+    {
+      "case_id": "sports",
+      "case_type": "out_of_scope",
+      "question": "Who won the FIFA World Cup in 2022?",
+      "passed": true,
+      "expected_pages": [],
+      "retrieved_pages": [],
+      "retrieved_scores": [],
+      "reason": "correctly rejected as unsupported"
+    },
+    {
+      "case_id": "salary",
+      "case_type": "out_of_scope",
+      "question": "What is the service desk salary?",
+      "passed": false,
+      "expected_pages": [],
+      "retrieved_pages": [
+        2,
+        1,
+        4
+      ],
+      "retrieved_scores": [
+        0.2416,
+        0.2308,
+        0.1201
+      ],
+      "reason": "unexpectedly retrieved page(s) [2, 1, 4]"
+    },
+    {
+      "case_id": "token",
+      "case_type": "out_of_scope",
+      "question": "What is the password reset token lifetime?",
+      "passed": true,
+      "expected_pages": [],
+      "retrieved_pages": [],
+      "retrieved_scores": [],
+      "reason": "correctly rejected as unsupported"
+    }
+  ]
+}

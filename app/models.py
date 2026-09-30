@@ -1,17 +1,22 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, ConfigDict, Field
 
 ExplanationLevel = Literal["beginner", "intermediate", "advanced"]
 AnswerMode = Literal["gemini", "retrieval"]
+Language = Literal["english", "arabic"]
 
 
-class QuestionRequest(BaseModel):
+class InputModel(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+
+class QuestionRequest(InputModel):
     question: str = Field(min_length=3, max_length=1000)
     top_k: int = Field(default=3, ge=1, le=5)
     level: ExplanationLevel = "intermediate"
-    use_llm: bool = True
+    use_llm: bool = False  # Explicit opt-in before sending excerpts to a provider.
+    language: Language = "english"
 
 
 class SourceChunk(BaseModel):
@@ -24,14 +29,16 @@ class AnswerResponse(BaseModel):
     answer: str
     level: ExplanationLevel
     mode: AnswerMode
+    language: Language = "english"
     sources: list[SourceChunk]
 
 
-class QuizRequest(BaseModel):
+class QuizRequest(InputModel):
     topic: str = Field(min_length=3, max_length=300)
     difficulty: ExplanationLevel = "intermediate"
     count: int = Field(default=3, ge=1, le=5)
     top_k: int = Field(default=5, ge=1, le=8)
+    language: Language = "english"
 
 
 class QuizQuestion(BaseModel):
@@ -39,6 +46,7 @@ class QuizQuestion(BaseModel):
     question: str
     concept: str
     page: int
+    language: Language = "english"
 
 
 class QuizResponse(BaseModel):
@@ -47,8 +55,8 @@ class QuizResponse(BaseModel):
     questions: list[QuizQuestion]
 
 
-class QuizAnswerRequest(BaseModel):
-    question_id: str
+class QuizAnswerRequest(InputModel):
+    question_id: str = Field(min_length=1, max_length=64)
     student_answer: str = Field(min_length=1, max_length=3000)
 
 
@@ -68,6 +76,7 @@ class QuizGradeResponse(BaseModel):
     mastery_score: float
     next_difficulty: ExplanationLevel
     weak_concepts: list[WeakConcept]
+    language: Language = "english"
 
 
 class ProgressResponse(BaseModel):
@@ -77,15 +86,13 @@ class ProgressResponse(BaseModel):
     weak_concepts: list[WeakConcept]
 
 
-class ReviewRequest(BaseModel):
-    concept: str | None = Field(default=None, max_length=300)
+class ReviewRequest(InputModel):
+    concept: str | None = Field(default=None, min_length=1, max_length=300)
     level: ExplanationLevel | None = None
     top_k: int = Field(default=3, ge=1, le=5)
+    language: Language = "english"
+    use_llm: bool = False
 
 
-class ReviewResponse(BaseModel):
+class ReviewResponse(AnswerResponse):
     concept: str
-    answer: str
-    level: ExplanationLevel
-    mode: AnswerMode
-    sources: list[SourceChunk]

@@ -1,17 +1,31 @@
 import json
+import math
 import os
 import re
+import unicodedata
 
-from google import genai
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+try:
+    from google import genai
+except ImportError:  # Retrieval-only mode does not need a provider SDK.
+    genai = None
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 
 
 class GeminiTutor:
     """Provider wrapper for grounded bilingual educational explanations and quizzes."""
 
     def __init__(self) -> None:
-        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        self.client = genai.Client(api_key=self.api_key) if self.api_key else None
+        self.client = (
+            genai.Client(api_key=self.api_key, http_options={"timeout": 30000})
+            if self.api_key and genai is not None else None
+        )
 
     @property
     def available(self) -> bool:
@@ -33,7 +47,8 @@ class GeminiTutor:
         """Extract PDF page numbers from citations such as [p. 8] or [p. 3, p. 10]."""
         return [
             int(match)
-            for match in re.findall(r"\bp\.\s*(\d+)", text, flags=re.IGNORECASE)
+            for block in re.findall(r"\[[^\]\n]+\]", text)
+            for match in re.findall(r"\bp\.\s*(\d+)", block, flags=re.IGNORECASE)
         ]
 
     @classmethod
@@ -55,6 +70,9 @@ class GeminiTutor:
     @staticmethod
     def _numeric_values(text: str) -> set[str]:
         """Extract normalized numeric values for deterministic grounding checks."""
+        # Normalize Arabic-Indic digits and separators for bilingual checking.
+        text = "".join(str(unicodedata.decimal(c)) if c.isdecimal() else c for c in text)
+        text = text.replace("٫", ".").replace("٬", ",")
         values: set[str] = set()
         for match in re.finditer(r"(?<![\w.])-?\d[\d,]*(?:\.\d+)?", text):
             raw = match.group(0).replace(",", "")
@@ -79,11 +97,11 @@ class GeminiTutor:
         question: str,
         sources: list[dict],
     ) -> list[str]:
-        """Return answer numbers that do not occur in the question or supplied evidence."""
+        """Return answer numbers absent from the evidence; questions are not evidence."""
         answer_without_citations = cls._strip_page_citations(answer)
         answer_values = cls._numeric_values(answer_without_citations)
 
-        allowed_text = question + "\n" + "\n".join(
+        allowed_text = "\n".join(
             str(source.get("text", "")) for source in sources
         )
         allowed_values = cls._numeric_values(allowed_text)
@@ -209,7 +227,7 @@ RULES:
 - Do not add outside facts, even if you know them.
 - Address every distinct part of the learner's question that is supported by the source context.
 - Prefer specific quantitative or concrete evidence over vague summary statements when both are available.
-- Copy quantitative values, ranges, percentages, years, and measurements exactly from the supplied source context or learner question. Do not calculate, convert, interpolate, round, or invent numeric values.
+- Copy quantitative values, ranges, percentages, years, and measurements exactly from the supplied source context. Do not calculate, convert, interpolate, round, or invent numeric values.
 - If one part of a multi-part question is not supported, explicitly say that the supplied evidence does not support that part instead of silently omitting it.
 - If the sources do not contain enough information to answer reliably, say exactly:
   "{refusal}"
@@ -243,15 +261,18 @@ Write a direct educational answer with page citations.
         invalid_pages = self.invalid_citation_pages(text, allowed_pages)
         unsupported_numbers = self.unsupported_numeric_values(text, question, sources)
 
-        if invalid_pages or unsupported_numbers:
+        missing_citation = not self.cited_pages(text) and text != refusal
+        if invalid_pages or unsupported_numbers or missing_citation:
             problems: list[str] = []
+            if missing_citation:
+                problems.append("a substantive answer without any source-page citation")
             if invalid_pages:
                 problems.append(
                     f"citations outside the supplied evidence pages: {invalid_pages}"
                 )
             if unsupported_numbers:
                 problems.append(
-                    f"numeric values not present in the question or supplied evidence: {unsupported_numbers}"
+                    f"numeric values not present in the supplied evidence: {unsupported_numbers}"
                 )
             problem_text = "; ".join(problems)
 
@@ -259,7 +280,7 @@ Write a direct educational answer with page citations.
 Rewrite the draft answer below so every factual statement is supported ONLY by the supplied source context.
 Do not add outside facts.
 Use ONLY these citation pages: {allowed_pages}.
-Copy every quantitative value exactly from the learner question or supplied source context.
+Copy every quantitative value exactly from the supplied source context.
 Do not calculate, convert, interpolate, round, or invent any numeric value.
 Correct the following grounding problem(s): {problem_text}.
 If a claim cannot be supported by the supplied context, remove it or state that the evidence does not support it.
@@ -289,6 +310,8 @@ DRAFT ANSWER:
                 question,
                 sources,
             )
+            if not self.cited_pages(repaired) and repaired != refusal:
+                raise RuntimeError("The language model returned an answer without source citations.")
             if remaining_invalid_pages:
                 raise RuntimeError(
                     "The language model returned citations outside the supplied evidence."
@@ -418,7 +441,13 @@ Use 1.0 for a fully correct answer, partial credit for partly correct answers, a
             raise RuntimeError("The language model returned an empty grading response.")
 
         result = self._parse_json(text)
-        score = float(result.get("score", 0.0))
-        score = max(0.0, min(1.0, score))
+        if not isinstance(result, dict) or isinstance(result.get("score"), bool):
+            raise RuntimeError("Invalid grading response.")
+        try:
+            score = float(result["score"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Invalid grading score.") from exc
+        if not math.isfinite(score) or not 0 <= score <= 1:
+            raise RuntimeError("Grading score must be finite and between zero and one.")
         feedback = str(result.get("feedback", "")).strip() or "Answer graded."
         return {"score": score, "feedback": feedback}

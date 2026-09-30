@@ -56,3 +56,9 @@ faiss_index/
 credentials.json
 secrets.json
 api_keys.txt
+
+# Keep the key-free template, never the real environment file.
+!.env.example
+artifacts/
+coverage.xml
+examples/fictional_handbook.pdf
