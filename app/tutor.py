@@ -122,9 +122,11 @@ class StudyTutor:
         level: str = "intermediate",
         use_llm: bool = True,
         language: str = "english",
+        retrieval_query: str | None = None,
     ) -> tuple[str, list[dict], str]:
         self.last_generation_error = None
-        retrieval_query = self._retrieval_query(question)
+        search_text = retrieval_query or question
+        retrieval_query = self._retrieval_query(search_text) if use_llm else search_text
         results = self.index.search(retrieval_query, top_k=top_k)
         if not results:
             message = (
@@ -162,7 +164,19 @@ class StudyTutor:
                 # Keep the public fallback safe, but preserve the failure reason
                 # for tests and evaluation so provider/validation failures are not
                 # silently indistinguishable from normal retrieval fallback.
-                self.last_generation_error = f"{type(exc).__name__}: {exc}"
+                # Provider messages may contain request URLs/keys. Retain only
+                # an error category/status, never raw provider output.
+                code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+                status = f" HTTP {code}" if isinstance(code, int) else ""
+                self.last_generation_error = f"{type(exc).__name__}{status}"
+
+        if not use_llm:
+            message = (
+                "تم اختيار الاسترجاع فقط. المقاطع أدناه من المصدر مباشرة، وليست إجابة مولدة."
+                if language == "arabic" else
+                "Retrieval-only mode selected. The passages below are source excerpts, not a generated answer."
+            )
+            return message, sources, "retrieval"
 
         answer = (
             "المولد اللغوي غير متاح لهذا الطلب، لكن المقاطع الأكثر صلة من المصدر معروضة أدناه حتى تتمكن من مراجعتها مباشرة."
@@ -206,6 +220,8 @@ class StudyTutor:
         public_questions: list[dict] = []
         for item in generated:
             question_id = uuid4().hex[:12]
+            if len(self.quiz_bank) >= 100:
+                self.quiz_bank.pop(next(iter(self.quiz_bank)))
             self.quiz_bank[question_id] = {
                 "question": item["question"],
                 "answer": item["answer"],
@@ -284,7 +300,7 @@ class StudyTutor:
         return {
             "mastery_score": round(self.progress.mastery_score, 3),
             "next_difficulty": self.progress.next_difficulty,
-            "attempts": len(self.progress.scores),
+            "attempts": self.progress.total_attempts,
             "weak_concepts": self.progress.weak_concepts,
         }
 
@@ -294,6 +310,7 @@ class StudyTutor:
         level: str | None = None,
         top_k: int = 3,
         language: str = "english",
+        use_llm: bool = True,
     ) -> tuple[str, str, list[dict], str, str]:
         selected_concept = concept or self.progress.weakest_concept
         if not selected_concept:
@@ -317,7 +334,8 @@ class StudyTutor:
             review_question,
             top_k=top_k,
             level=selected_level,
-            use_llm=True,
+            use_llm=use_llm,
             language=language,
+            retrieval_query=selected_concept,
         )
         return selected_concept, answer, sources, mode, selected_level

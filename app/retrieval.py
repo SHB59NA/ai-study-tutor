@@ -17,6 +17,9 @@ class Chunk:
 class DocumentIndex:
     """Page-aware lexical index with conservative grounding and robust reranking."""
 
+    MAX_PAGES = 300
+    MAX_TEXT_CHARS = 1_000_000
+    MAX_CHUNKS = 2000
     MIN_RELEVANCE_SCORE = 0.08
     LOW_COVERAGE_THRESHOLD = 0.60
     LOW_COVERAGE_SCORE_OVERRIDE = 0.35
@@ -41,6 +44,8 @@ class DocumentIndex:
 
     @staticmethod
     def _split_text(text: str, chunk_size: int = 900, overlap: int = 150) -> list[str]:
+        if chunk_size <= 0 or overlap < 0 or overlap >= chunk_size:
+            raise ValueError("Require chunk_size > 0 and 0 <= overlap < chunk_size.")
         clean = " ".join(text.split())
         if not clean:
             return []
@@ -55,43 +60,64 @@ class DocumentIndex:
             start = max(0, end - overlap)
         return chunks
 
-    def load_pdf(self, data: bytes) -> int:
-        reader = PdfReader(BytesIO(data))
-        chunks: list[Chunk] = []
+    @staticmethod
+    def normalize_text(text: str) -> str:
+        text = text.lower()
+        text = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", text)
+        text = text.translate(str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ى": "ي"}))
+        # Normalize a common conjunction prefix, not a full Arabic stemmer.
+        return re.sub(r"\bوال", "ال", text)
 
-        for page_number, page in enumerate(reader.pages, start=1):
-            text = page.extract_text() or ""
-            for chunk_text in self._split_text(text):
-                chunks.append(Chunk(page=page_number, text=chunk_text))
+    def load_pdf(self, data: bytes) -> int:
+        """Build an index locally and only replace the old one after success."""
+        from app.upload_validation import validate_pdf_upload
+
+        validate_pdf_upload("document.pdf", data)
+        try:
+            reader = PdfReader(BytesIO(data))
+            if reader.is_encrypted:
+                raise ValueError("Encrypted PDFs are not supported. Upload an unencrypted copy.")
+            if len(reader.pages) > self.MAX_PAGES:
+                raise ValueError(f"Use a PDF with at most {self.MAX_PAGES} pages.")
+            chunks: list[Chunk] = []
+            total_chars = 0
+            for page_number, page in enumerate(reader.pages, start=1):
+                text = page.extract_text() or ""
+                total_chars += len(text)
+                if total_chars > self.MAX_TEXT_CHARS:
+                    raise ValueError("Extracted text is too large. Split the PDF into smaller documents.")
+                for chunk_text in self._split_text(text):
+                    chunks.append(Chunk(page=page_number, text=chunk_text))
+                if len(chunks) > self.MAX_CHUNKS:
+                    raise ValueError("Too many document chunks. Split the PDF into smaller documents.")
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError("Unable to read this PDF. Check that it is a valid, unencrypted PDF.") from exc
 
         if not chunks:
-            raise ValueError("No extractable text was found in the PDF.")
-
+            raise ValueError("No extractable text was found. Scanned/image-only PDFs need OCR before upload.")
+        language = self.detect_language(" ".join(chunk.text for chunk in chunks[:50]))
+        texts = [chunk.text for chunk in chunks]
+        arabic_stop = ["ما", "هو", "هي", "من", "في", "عن", "علي", "كيف", "لماذا", "متي", "هل", "هذه", "هذا", "و", "الي"]
+        word_vectorizer = TfidfVectorizer(
+            stop_words="english" if language == "english" else arabic_stop,
+            preprocessor=self.normalize_text,
+            ngram_range=(1, 2), lowercase=True, max_features=60000,
+        )
+        char_vectorizer = TfidfVectorizer(
+            analyzer="char_wb", ngram_range=(3, 5), lowercase=True, max_features=40000,
+            preprocessor=self.normalize_text,
+        )
+        try:
+            word_matrix = word_vectorizer.fit_transform(texts)
+            char_matrix = char_vectorizer.fit_transform(texts)
+        except ValueError as exc:
+            raise ValueError("The PDF has no usable vocabulary for retrieval.") from exc
         self.chunks = chunks
-        sample = " ".join(chunk.text for chunk in chunks[:50])
-        self.language = self.detect_language(sample)
-
-        # Word TF-IDF is used for the conservative evidence gate and query
-        # vocabulary coverage. English stop words reduce generic overlap.
-        stop_words = "english" if self.language == "english" else None
-        self.vectorizer = TfidfVectorizer(
-            stop_words=stop_words,
-            ngram_range=(1, 2),
-            lowercase=True,
-        )
-        self.matrix = self.vectorizer.fit_transform([chunk.text for chunk in chunks])
-
-        # Character n-grams are more tolerant of PDF extraction artifacts such
-        # as split words (for example "chan ge" or "desalinat ed"). They are
-        # used only to rank evidence after the word-level grounding gate passes.
-        self.char_vectorizer = TfidfVectorizer(
-            analyzer="char_wb",
-            ngram_range=(3, 5),
-            lowercase=True,
-        )
-        self.char_matrix = self.char_vectorizer.fit_transform(
-            [chunk.text for chunk in chunks]
-        )
+        self.language = language
+        self.vectorizer, self.matrix = word_vectorizer, word_matrix
+        self.char_vectorizer, self.char_matrix = char_vectorizer, char_matrix
         return len(chunks)
 
     def _query_coverage(self, question: str) -> float:
@@ -99,7 +125,7 @@ class DocumentIndex:
         if self.vectorizer is None:
             return 0.0
 
-        tokens = re.findall(r"(?u)\b\w\w+\b", question.lower())
+        tokens = re.findall(r"(?u)\b\w\w+\b", self.normalize_text(question))
         stop_words = self.vectorizer.get_stop_words() or set()
         informative = {token for token in tokens if token not in stop_words}
         if not informative:
@@ -115,6 +141,12 @@ class DocumentIndex:
         top_k: int = 3,
         min_score: float | None = None,
     ) -> list[tuple[Chunk, float]]:
+        if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 20:
+            raise ValueError("top_k must be an integer between 1 and 20.")
+        if not question or not question.strip():
+            return []
+        if min_score is not None and (not np.isfinite(min_score) or not 0 <= min_score <= 1):
+            raise ValueError("min_score must be between zero and one.")
         if (
             not self.chunks
             or self.vectorizer is None

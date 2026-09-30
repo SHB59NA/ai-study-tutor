@@ -1,18 +1,26 @@
+import math
+
 from dataclasses import dataclass, field
 
 
 @dataclass
 class LearnerProgress:
+    total_attempts: int = 0
     scores: list[float] = field(default_factory=list)
     concept_scores: dict[str, list[float]] = field(default_factory=dict)
 
     def add_score(self, score: float, concept: str | None = None) -> None:
+        if not math.isfinite(score):
+            raise ValueError("Score must be finite.")
+        self.total_attempts += 1
         bounded = max(0.0, min(1.0, score))
         self.scores.append(bounded)
         self.scores = self.scores[-10:]
 
         if concept:
             key = concept.strip()
+            if key not in self.concept_scores and len(self.concept_scores) >= 100:
+                self.concept_scores.pop(next(iter(self.concept_scores)))
             history = self.concept_scores.setdefault(key, [])
             history.append(bounded)
             self.concept_scores[key] = history[-5:]

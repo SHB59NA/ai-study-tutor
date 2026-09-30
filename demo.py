@@ -1,4 +1,10 @@
 from pathlib import Path
+import os
+import html
+
+from app.models import QuestionRequest, QuizRequest, QuizAnswerRequest, ReviewRequest
+from app.upload_validation import MAX_PDF_BYTES
+from examples.make_demo import make_demo_pdf
 
 import gradio as gr
 
@@ -97,7 +103,8 @@ HERO_HTML = """
   </p>
   <div class="hero-badges">
     <span class="hero-badge">English + العربية</span>
-    <span class="hero-badge">Cross-language retrieval</span>
+    <span class="hero-badge">TF-IDF + optional Gemini</span>
+    <span class="hero-badge">In development</span>
     <span class="hero-badge">Source-grounded RAG</span>
     <span class="hero-badge">Adaptive quizzes</span>
     <span class="hero-badge">Weak-concept detection</span>
@@ -167,6 +174,10 @@ def format_progress(tutor, language: str = "english") -> str:
     attempts = int(progress["attempts"])
     next_difficulty = progress["next_difficulty"]
     weak_concepts = progress["weak_concepts"]
+    if attempts == 0:
+        return ("لم يتم التقييم بعد. أكمل سؤال اختبار أولاً؛ هذا ليس تقييماً أكاديمياً رسمياً."
+                if language == "arabic" else
+                "Not assessed yet. Complete a quiz first. Scores are prototype feedback, not official assessment.")
 
     if language == "arabic":
         if weak_concepts:
@@ -240,6 +251,8 @@ def upload_pdf(file_path, language_choice, request: gr.Request):
 
     session = _session(request)
     try:
+        if path.stat().st_size > MAX_PDF_BYTES:
+            raise ValueError("PDF exceeds the 20 MB limit.")
         with session.lock:
             chunks = session.tutor.load_document(path.name, path.read_bytes())
             document_language = session.tutor.document_language
@@ -261,7 +274,7 @@ def upload_pdf(file_path, language_choice, request: gr.Request):
     if language == "arabic":
         yield (
             "### المستند جاهز\n\n"
-            f"**الملف:** {path.name}  \n"
+            f"**الملف:** {html.escape(path.name)}  \n"
             f"**لغة المصدر المكتشفة:** {detected}  \n"
             f"**عدد مقاطع المصدر المفهرسة:** {chunks}  \n\n"
             "يمكنك الآن السؤال بالعربية أو الإنجليزية. سيبقى المستند وتقدم التعلم خاصين بجلسة المتصفح الحالية."
@@ -270,14 +283,14 @@ def upload_pdf(file_path, language_choice, request: gr.Request):
 
     yield (
         "### Document ready\n\n"
-        f"**File:** {path.name}  \n"
+        f"**File:** {html.escape(path.name)}  \n"
         f"**Detected source language:** {detected}  \n"
         f"**Indexed source chunks:** {chunks}  \n\n"
         "You can now ask in English or Arabic. The document and learner progress belong only to your current browser session."
     )
 
 
-def ask_tutor(question, level, language_choice, request: gr.Request):
+def ask_tutor(question, level, language_choice, use_generation, request: gr.Request):
     language = _language(language_choice)
     session = _session(request)
 
@@ -301,19 +314,20 @@ def ask_tutor(question, level, language_choice, request: gr.Request):
     yield _thinking(language, "answer"), ""
 
     try:
+        QuestionRequest(question=question, level=level, language=language, use_llm=use_generation)
         with session.lock:
             answer, sources, mode = session.tutor.answer(
                 question.strip(),
                 top_k=3,
                 level=level,
-                use_llm=True,
+                use_llm=use_generation,
                 language=language,
             )
     except Exception as exc:
         yield (
-            f"### تعذر إنشاء الإجابة\n`{exc}`"
+            "### تعذر إنشاء الإجابة\nتحقق من إعدادات المولد أو استخدم الاسترجاع فقط."
             if language == "arabic"
-            else f"### Unable to answer\n`{exc}`"
+            else "### Unable to answer\nCheck provider configuration or use retrieval-only mode."
         ), ""
         return
 
@@ -326,7 +340,8 @@ def ask_tutor(question, level, language_choice, request: gr.Request):
         )
         score_label = "درجة الاسترجاع" if language == "arabic" else "Retrieval score"
         evidence.append(
-            f"{heading}\n**{score_label}:** {source['score']}\n\n> {source['text']}"
+            f"{heading}\n**{score_label}:** {source['score']} (similarity, not confidence)"
+            f"\n<pre style='white-space:pre-wrap'>{html.escape(source['text'])}</pre>"
         )
 
     source_text = "\n\n---\n\n".join(evidence)
@@ -375,6 +390,7 @@ def generate_quiz_question(topic, difficulty, language_choice, request: gr.Reque
     yield None, _thinking(language, "quiz"), ""
 
     try:
+        QuizRequest(topic=topic, difficulty=difficulty, language=language)
         with session.lock:
             questions = session.tutor.create_quiz(
                 topic=topic.strip(),
@@ -385,9 +401,9 @@ def generate_quiz_question(topic, difficulty, language_choice, request: gr.Reque
             )
     except Exception as exc:
         message = (
-            f"### تعذر إنشاء الاختبار\n`{exc}`"
+            "### تعذر إنشاء الاختبار\nتحقق من الموضوع وتوفر خدمة Gemini؛ لم يتغير تقدمك."
             if language == "arabic"
-            else f"### Unable to generate a quiz\n`{exc}`"
+            else "### Unable to generate a quiz\nCheck the topic and Gemini availability. Your progress is unchanged."
         )
         yield None, message, ""
         return
@@ -435,6 +451,7 @@ def grade_answer(question_id, student_answer, language_choice, request: gr.Reque
     yield _thinking(language, "grade"), current_progress
 
     try:
+        QuizAnswerRequest(question_id=question_id, student_answer=student_answer)
         with session.lock:
             result = session.tutor.grade_quiz_answer(
                 question_id=question_id,
@@ -444,9 +461,9 @@ def grade_answer(question_id, student_answer, language_choice, request: gr.Reque
             progress_text = format_progress(session.tutor, result_language)
     except Exception as exc:
         yield (
-            f"### تعذر تصحيح الإجابة\n`{exc}`"
+            "### تعذر التصحيح\nتحقق من الإجابة وتوفر Gemini. حاول لاحقاً."
             if language == "arabic"
-            else f"### Unable to grade the answer\n`{exc}`"
+            else "### Unable to grade the answer\nCheck the answer and Gemini availability, then retry."
         ), current_progress
         return
 
@@ -480,7 +497,7 @@ def show_progress(language_choice, request: gr.Request):
         return format_progress(session.tutor, language)
 
 
-def personalized_review(concept, level, language_choice, request: gr.Request):
+def personalized_review(concept, level, language_choice, use_generation, request: gr.Request):
     language = _language(language_choice)
     session = _session(request)
 
@@ -501,18 +518,21 @@ def personalized_review(concept, level, language_choice, request: gr.Request):
     yield _thinking(language, "review"), ""
 
     try:
+        ReviewRequest(concept=selected_concept, level=selected_level, language=language,
+                      use_llm=use_generation)
         with session.lock:
             concept_name, answer, sources, mode, final_level = session.tutor.personalized_review(
                 concept=selected_concept,
                 level=selected_level,
                 top_k=3,
                 language=language,
+                use_llm=use_generation,
             )
     except Exception as exc:
         message = (
-            f"### تعذر إنشاء المراجعة\n`{exc}`"
+            "### تعذر إنشاء المراجعة\nاختر مفهوماً من المصدر أو أكمل اختباراً أولاً."
             if language == "arabic"
-            else f"### Unable to create a review\n`{exc}`"
+            else "### Unable to create a review\nChoose a source concept or complete a quiz first."
         )
         yield message, ""
         return
@@ -524,7 +544,7 @@ def personalized_review(concept, level, language_choice, request: gr.Request):
             if language == "arabic"
             else f"### PDF page {source['page']}"
         )
-        evidence.append(f"{heading}\n\n> {source['text']}")
+        evidence.append(f"{heading}\n<pre style='white-space:pre-wrap'>{html.escape(source['text'])}</pre>")
 
     if language == "arabic":
         mode_label = "Gemini موثّق بالمصدر" if mode == "gemini" else "استرجاع من المصدر"
@@ -545,10 +565,25 @@ def personalized_review(concept, level, language_choice, request: gr.Request):
     yield header, "\n\n---\n\n".join(evidence)
 
 
+def load_example(language_choice, request: gr.Request):
+    session = _session(request)
+    with session.lock:
+        count = session.tutor.load_document("fictional_handbook.pdf", make_demo_pdf())
+    return (f"### المثال جاهز\n{count} مقاطع من دليل خيالي. اختر Ask Tutor للسؤال."
+            if _language(language_choice) == "arabic" else
+            f"### Example ready\n{count} chunks from an original, fictional IT handbook. "
+            "Open Ask Tutor and ask: What does a primary key identify?")
+
+
+def clear_session(request: gr.Request):
+    cleanup_session(request)
+    return (None, "Session cleared / تم حذف المستند والتقدم", "", "", None,
+            "", "", "", "", "", "", "", "")
+
+
 with gr.Blocks(
     title="AI Study Tutor | Bilingual Source-Grounded Learning",
-    theme=gr.themes.Soft(),
-    css=APP_CSS,
+    analytics_enabled=False,
     delete_cache=(3600, 3600),
 ) as demo:
     gr.HTML(HERO_HTML)
@@ -572,7 +607,8 @@ with gr.Blocks(
                 gr.Markdown("## Start with trusted study material")
                 gr.Markdown(
                     "Upload one educational PDF. The tutor detects its main language and uses it as the evidence base. "
-                    "You may then ask in English or Arabic, even when the PDF is in the other language."
+                    "Same-language retrieval works without an API key. Cross-language search requires Gemini. "
+                    "Use only material you have permission to share; never upload private student records."
                 )
                 pdf_file = gr.File(
                     label="Study material (PDF)",
@@ -581,7 +617,9 @@ with gr.Blocks(
                 )
                 upload_button = gr.Button("Load study material", variant="primary")
                 upload_status = gr.Markdown()
-                upload_button.click(
+                example_button = gr.Button("Use fictional sample / جرب المثال")
+                example_event = example_button.click(load_example, inputs=[language_choice], outputs=upload_status)
+                upload_event = upload_button.click(
                     upload_pdf,
                     inputs=[pdf_file, language_choice],
                     outputs=upload_status,
@@ -613,6 +651,12 @@ with gr.Blocks(
                     value="intermediate",
                     label="Explanation level / مستوى الشرح",
                 )
+                use_generation = gr.Checkbox(
+                    value=False,
+                    label="Enable Gemini / تفعيل Gemini",
+                    info="When enabled, your question and retrieved excerpts are sent to Google. "
+                         "Without it, passages are retrieved locally; no generated answer is claimed.",
+                )
                 ask_button = gr.Button("Ask tutor / اسأل", variant="primary")
 
             with gr.Column(scale=3):
@@ -622,7 +666,7 @@ with gr.Blocks(
 
         ask_button.click(
             ask_tutor,
-            inputs=[question, level, language_choice],
+            inputs=[question, level, language_choice, use_generation],
             outputs=[answer_output, source_output],
             show_progress="full",
         )
@@ -633,6 +677,8 @@ with gr.Blocks(
         with gr.Row():
             with gr.Column(scale=2):
                 gr.Markdown("## Practice from the same source / اختبر نفسك")
+                gr.Markdown("Quiz creation and grading use Gemini and send relevant text to Google. "
+                            "They require a server-side API key. / الاختبارات تحتاج خدمة Gemini.")
                 topic = gr.Textbox(
                     label="Quiz topic / موضوع الاختبار",
                     placeholder="Climate Change Impacts in Kuwait | تأثيرات تغير المناخ في الكويت",
@@ -714,7 +760,7 @@ with gr.Blocks(
 
         review_button.click(
             personalized_review,
-            inputs=[review_concept, review_level, language_choice],
+            inputs=[review_concept, review_level, language_choice, use_generation],
             outputs=[review_output, review_sources],
             show_progress="full",
         )
@@ -722,7 +768,7 @@ with gr.Blocks(
     with gr.Tab("About"):
         gr.Markdown(
             "## Research motivation\n\n"
-            "AI Study Tutor explores human-centered, source-grounded AI for education. Version 0.8 adds "
+            "AI Study Tutor is an in-development educational prototype. Version 0.9 hardens "
             "bilingual English/Arabic tutoring and cross-language retrieval while preserving visible source evidence.\n\n"
             "### Bilingual retrieval design\n\n"
             "- The uploaded PDF's dominant script is detected as English or Arabic.\n"
@@ -749,8 +795,36 @@ with gr.Blocks(
         "</div>"
     )
 
+    clear_button = gr.Button("Clear my session / حذف مستندي وتقدمي")
+    clear_button.click(
+        clear_session, inputs=[],
+        outputs=[pdf_file, upload_status, answer_output, source_output, quiz_id,
+                 quiz_question, quiz_meta, student_answer, grade_output,
+                 progress_after_grade, progress_output, review_output, review_sources],
+    )
+    # Clear learning panels on every upload attempt; no stale quiz ID remains visible.
+    for loaded_event in (upload_event, example_event):
+        loaded_event.then(
+            lambda: ("", "", None, "", "", "", "", "", "", "", ""),
+            outputs=[answer_output, source_output, quiz_id, quiz_question, quiz_meta,
+                     student_answer, grade_output, progress_after_grade, progress_output,
+                     review_output, review_sources],
+        )
     demo.unload(cleanup_session)
 
 
+def launch_demo():
+    """Never open a public tunnel implicitly. CPU hosting is sufficient."""
+    root = Path(__file__).resolve().parent
+    demo.queue(max_size=32, default_concurrency_limit=4).launch(
+        share=False,
+        server_name=os.getenv("GRADIO_SERVER_NAME", "127.0.0.1"),
+        server_port=int(os.getenv("GRADIO_SERVER_PORT", "7860")),
+        max_file_size="20mb",
+        blocked_paths=[str(root / ".env"), str(root / ".git")],
+        theme=gr.themes.Soft(font=["Arial", "sans-serif"], font_mono=["Courier New", "monospace"]), css=APP_CSS,
+    )
+
+
 if __name__ == "__main__":
-    demo.launch(share=True)
+    launch_demo()

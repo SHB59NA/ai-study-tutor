@@ -14,7 +14,7 @@ concurrency:
 jobs:
   offline-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       GEMINI_API_KEY: ""
       GOOGLE_API_KEY: ""
@@ -37,18 +37,29 @@ jobs:
           python-version: '3.11'
           cache: pip
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt httpx pytest-cov
+        run: python -m pip install -r requirements-dev.txt
+      - name: Check working-tree credential patterns
+        run: python scripts/secret_scan.py
       - name: Run offline regression tests
         run: python -m pytest -q --junitxml=artifacts/junit.xml --cov=app --cov-report=term-missing --cov-report=xml:artifacts/coverage.xml
+      - name: Measure fictional retrieval fixture
+        run: python -m evaluation.offline_demo --output artifacts/synthetic_retrieval.json
+      - name: Install browser for UI smoke test
+        run: python -m playwright install --with-deps chromium
+      - name: Exercise UI and capture real screenshots
+        run: python scripts/capture_demo.py
       - name: Record installed versions
         if: always()
         run: python -m pip freeze > artifacts/environment.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-results
+          name: validation-results
           path: |
             artifacts/junit.xml
             artifacts/coverage.xml
             artifacts/environment.txt
+            artifacts/synthetic_retrieval.json
+            artifacts/demo-*.png
+            artifacts/demo-server.log
           retention-days: 14

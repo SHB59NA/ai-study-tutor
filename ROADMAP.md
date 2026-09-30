@@ -1,50 +1,29 @@
 # Roadmap
 
-## Phase 1 — Grounded Retrieval MVP
+## Implemented, still in development
 
-- [x] FastAPI backend
-- [x] PDF upload
-- [x] Text extraction
-- [x] Chunking
-- [x] TF-IDF retrieval
-- [x] Page-aware source passages
-- [x] Basic retrieval test
+- Page-aware PDF ingestion and lexical TF-IDF retrieval.
+- English/Arabic interface and optional query translation.
+- Optional Gemini explanations, quizzes, grading, and review.
+- Citation-page, citation-presence, and numeric validation with safe fallback.
+- Independent sessions in the API and Gradio; expiry, capacity, deletion.
+- Offline tests, sample material, transparent benchmark, CI, and browser-capture script.
 
-## Phase 2 — Generative Tutor
+## Needs further evidence before stronger claims
 
-- [x] Add LLM provider wrapper
-- [x] Generate explanations only from retrieved context
-- [x] Require page citations in generated answers
-- [x] Refuse unsupported questions gracefully
-- [x] Add beginner / intermediate / advanced explanation modes
-- [x] Keep transparent retrieval fallback when no API key is configured
+- A fresh, explicitly authorized live-provider evaluation with quota available.
+- Multiple real educational documents and a held-out question set.
+- Human review of answer correctness, citation support, and Arabic quality.
+- Usability feedback from consenting participants; no private student records.
+- Dependency/security review and threat modeling before public deployment.
 
-## Phase 3 — Intelligent Learning Support
+## Future features (not completed)
 
-- [x] Quiz generation from source material
-- [x] Answer checking with educational feedback
-- [x] Track a transparent learner mastery score
-- [x] Adapt recommended quiz difficulty from recent performance
-- [x] Track concept-level performance
-- [x] Detect weak concepts
-- [x] Recommend specific concepts to review next
-- [x] Generate a personalized source-grounded review for the weakest concept
-- [ ] Persist learner progress across sessions
+- Multilingual semantic embeddings and comparative retrieval evaluation.
+- Safe OCR for scanned PDFs.
+- Account authentication, shared persistent session storage, rate limiting.
+- Teacher controls and durable learner progress with appropriate consent.
+- Concept normalization and validated learning analytics.
+- Multi-document study sessions.
 
-## Phase 4 — Human-Centered Educational AI
-
-- [ ] Arabic + English support
-- [ ] Student feedback controls
-- [ ] Instructor content controls
-- [ ] Learning analytics dashboard
-- [ ] Evaluate answer faithfulness
-- [ ] Evaluate usability and educational usefulness
-
-## Research Questions
-
-1. How can a study assistant remain grounded in instructor-provided learning material while still giving useful explanations?
-2. How should explanations adapt to learner knowledge without removing productive struggle?
-3. How can citations and uncertainty improve student trust in AI-generated educational guidance?
-4. What interaction design best supports educators while keeping them in control of the learning process?
-5. Can a simple, transparent mastery model improve the sequencing of AI-generated educational questions?
-6. Can concept-level performance signals help an AI tutor recommend useful, targeted review without over-automating the learning process?
+Do not mark a feature completed based solely on a README description or a mock-provider test.
